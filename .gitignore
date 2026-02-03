@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Data and indexes
+# data/
+*.pkl
+*.bin
+*.index
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+*.csv
+*.pdf
+*.pkl
+*.bin
+*.index
+*.pkl.gz
+*.pkl.bz2
+*.pkl.zip
+*.pkl.tar
+*.pkl.tar.gz
+*.pkl.tar.bz2
+*.pkl.tar.zip
+*.pkl.tar.tar
+./app/data/
+app/data
