@@ -213,15 +213,18 @@ def main() -> None:
             skipped += 1
             continue
 
-        texts.append(text)
-        metadatas.append(
-            {
-                "id": int(i),
-                "text": text,
-                "source": str(dataset_path),
-                "raw": {str(k): ("" if pd.isna(v) else str(v)) for k, v in row_dict.items()},
-            }
-        )
+        raw_dict = {str(k): ("" if pd.isna(v) else str(v)) for k, v in row_dict.items()}
+        # Tag cloud_deployments rows for filter_type="deployment" in provision-intent search
+        doc_type = "deployment" if "intent" in row_dict and raw_dict.get("intent") else None
+        meta_entry = {
+            "id": int(i),
+            "text": text,
+            "source": str(dataset_path),
+            "raw": raw_dict,
+        }
+        if doc_type:
+            meta_entry["type"] = doc_type
+        metadatas.append(meta_entry)
 
         # Progress indicator every 50 rows
         if (i + 1) % 50 == 0:

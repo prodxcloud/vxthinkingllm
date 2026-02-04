@@ -76,6 +76,9 @@ API ENDPOINTS:
     V3 (Cloud/DevOps Incident Patterns):
         POST /api/model/v3/query     - Unusual incident patterns + metrics
 
+    Cloud provisioning (intent + Golang payload for agent):
+        POST /api/cloud/provision-intent - Intent + payload for provisioning; query_type for incidents/cost/billing/security/recommendations
+
 DEPLOYMENT:
 ===========
     Single Node:  python -m app.app
@@ -359,12 +362,14 @@ try:
     from .services.ai.ml.embeddings import VectorStore
     from .services.ai.ml.reasoning import ReasoningEngine
     from .services.ai.ml.routes import router, router_v2, router_v3
+    from .services.ai.ml.cloud_routes import router as cloud_router
 except ImportError as e:
     # Only fall back when running without a package context.
     if "attempted relative import with no known parent package" in str(e):
         from services.ai.ml.embeddings import VectorStore
         from services.ai.ml.reasoning import ReasoningEngine
         from services.ai.ml.routes import router, router_v2, router_v3
+        from services.ai.ml.cloud_routes import router as cloud_router
     else:
         raise
 
@@ -815,6 +820,7 @@ logger.info(f"📁 Logs will be saved to: {LOG_FILE}")
 app.include_router(router, prefix="/api/model/v1")
 app.include_router(router_v2, prefix="/api/model/v2")
 app.include_router(router_v3, prefix="/api/model/v3")
+app.include_router(cloud_router)  # POST /api/cloud/provision-intent (intent + Golang payload)
 
 # Include platform routes
 try:
