@@ -51,7 +51,7 @@ except ImportError:
 #
 # BETTER QUALITY (still reasonable size):
 # EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"  # 120MB, 384 dim
-EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # 80MB, 384 dim, FAST
+EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"  # 80MB, 384 dim, FAST
 # 
 # MULTILINGUAL (if you have non-English data):
 # EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # 470MB
@@ -279,7 +279,7 @@ def main() -> None:
     print("-" * 50)
     print(f"    Model: {args.embedding_model}")
 
-    model = SentenceTransformer(args.embedding_model)
+    model = SentenceTransformer(args.embedding_model, trust_remote_code=True)
 
     # Check device
     device = "cuda" if model.device.type == "cuda" else "cpu"

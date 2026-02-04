@@ -191,32 +191,6 @@ This document outlines the comprehensive plan to elevate VaLLM from a functional
 
 ---
 
-## 6. Parallel Precompute
-
-### Current State
-- Sequential CSV processing
-- Slow for large datasets
-
-### Solution: Parallel Batch Processing
-
-**File:** `app/precompute_parallel.py`
-
-**Features:**
-- Parallel CSV processing
-- Batch embedding generation
-- Concurrent FAISS index building
-- Progress tracking
-- Memory-efficient batching
-
-**Performance Improvement:**
-- 5-10x faster for large datasets
-- Better resource utilization
-- Progress visibility
-
-**Implementation Priority:** Phase 2 (High)
-
----
-
 ## 7. Optimized Async Operations
 
 ### Current State

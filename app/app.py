@@ -358,15 +358,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 try:
     from .services.ai.ml.embeddings import VectorStore
     from .services.ai.ml.reasoning import ReasoningEngine
-    from .services.ai.ml.routes import router, router_v3
-    from .services.ai.ml.routes_v2 import router as router_v2
+    from .services.ai.ml.routes import router, router_v2, router_v3
 except ImportError as e:
     # Only fall back when running without a package context.
     if "attempted relative import with no known parent package" in str(e):
         from services.ai.ml.embeddings import VectorStore
         from services.ai.ml.reasoning import ReasoningEngine
-        from services.ai.ml.routes import router, router_v3
-        from services.ai.ml.routes_v2 import router as router_v2
+        from services.ai.ml.routes import router, router_v2, router_v3
     else:
         raise
 
@@ -564,9 +562,8 @@ def display_system_info(
         print("    │  POST /search                      Vector search        │")
         print("    │  POST /generate                    LLM generation       │")
         print("    │  POST /api/model/v1/query          RAG + Reasoning      │")
-        print("    │  POST /api/model/v1/query/websearch Web Search + RAG    │")
         print("    │  POST /api/model/v2/query          NLP + Documents      │")
-        print("    │  POST /api/model/v3/query          Incidents + Web 🔥   │")
+        print("    │  POST /api/model/v3/query          Incident Patterns    │")
         print("    └─────────────────────────────────────────────────────────┘")
         print("\033[0m")
     except UnicodeEncodeError:

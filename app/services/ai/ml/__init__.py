@@ -19,8 +19,7 @@ from .health import HealthChecker
 from .rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
 
 # Routes
-from .routes import router, router_v3
-from .routes_v2 import router as router_v2
+from .routes import router, router_v2, router_v3
 
 __all__ = [
     # Core

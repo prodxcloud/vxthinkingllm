@@ -7,7 +7,9 @@
       "Bash(chcp 65001)",
       "Bash(powershell -Command \"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; python ./app/precompute.py\")",
       "Bash(powershell -Command \"$env:PYTHONIOENCODING=''utf-8''; python ./app/precompute.py\")",
-      "Bash(timeout /t 10 /nobreak)"
+      "Bash(timeout /t 10 /nobreak)",
+      "Bash(grep:*)",
+      "Bash(python3:*)"
     ]
   }
 }

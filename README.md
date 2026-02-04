@@ -233,7 +233,6 @@ See `deployment.md` for detailed instructions.
 | POST | `/api/model/v1/query` | Main RAG query with reasoning |
 | POST | `/api/model/v1/developer` | Developer/Terraform assistance |
 | POST | `/api/model/v1/terminal` | CLI command assistance |
-| POST | `/api/model/v1/query/websearch` | RAG with web search |
 
 **Example Request**:
 ```json
@@ -363,12 +362,9 @@ va_llm_v1/
 │   ├── app.py                    # FastAPI application
 │   ├── embeddings.py             # VectorStore (FAISS)
 │   ├── reasoning.py              # ReasoningEngine
-│   ├── routes.py                 # API v1 endpoints
-│   ├── routes_v2.py              # API v2 endpoints (NLP)
+│   ├── routes.py                 # All API endpoints (v1, v2, v3)
 │   ├── precompute.py             # Build FAISS index
-│   ├── precompute_parallel.py    # Parallel index building
 │   ├── train.py                  # LLM fine-tuning
-│   ├── web_search.py             # Web search integration
 │   ├── cache.py                  # Multi-level caching
 │   ├── circuit_breaker.py        # Resilience pattern
 │   ├── exceptions.py             # Custom exceptions
@@ -413,9 +409,6 @@ All data is in `app/data/`:
 ```bash
 # Standard precompute
 python -m app.precompute
-
-# Parallel precompute (faster for large datasets)
-python -m app.precompute_parallel
 
 # Check index status
 python -m app.precompute --action check

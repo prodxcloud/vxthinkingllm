@@ -75,16 +75,17 @@ except ImportError:
 # ULTRA TINY (< 50MB) - Fastest, great for testing:
 # LLM_MODEL_NAME = "sshleifer/tiny-gpt2"                  # ~2MB, instant on CPU
 # LLM_MODEL_NAME = "roneneldan/TinyStories-1M"          # ~4MB, 1M params
-LLM_MODEL_NAME = "roneneldan/TinyStories-8M"          # ~32MB, 8M params
+# LLM_MODEL_NAME = "roneneldan/TinyStories-8M"          # ~32MB, 8M params
+LLM_MODEL_NAME = "Qwen/Qwen2.5-Coder-7B-Instruct"       # ~15GB VRAM
 # LLM_MODEL_NAME = "roneneldan/TinyStories-33M"         # ~130MB, 33M params
 #
 # FOR CPU / LOW VRAM (< 8GB) - Good quality:
 # LLM_MODEL_NAME = "distilgpt2"                         # ~350MB, runs on CPU
-#
 # FOR MEDIUM GPU (8-12GB VRAM):
 # LLM_MODEL_NAME = "microsoft/phi-2"                    # 2.7B params, ~6GB VRAM
 # LLM_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0" # 1.1B params, ~3GB VRAM
-#
+## FOR RESUMES & REASONING:
+# LLM_MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"  # ~16GB VRAM
 # FOR HIGH-END GPU (16GB+ VRAM):
 # LLM_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2" # 7B params, ~14GB VRAM
 # ============================================================================
