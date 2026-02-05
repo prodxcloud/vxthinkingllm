@@ -54,7 +54,8 @@ except ImportError:
 # HARDCODED EMBEDDING MODEL CONFIGURATION
 # ============================================================================
 # SOTA Choice for 2026: 4096 dim, high-precision technical retrieval
-EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"
+# EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = 4096 
 # ============================================================================
 

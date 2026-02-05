@@ -1,7 +1,7 @@
 """
 VaLLM Precompute Script - Build FAISS Index from CSV Data
 
-This script reads all CSVs from app/data/*.csv, generates embeddings using
+This script reads all CSVs from app/data/datasets/*.csv, generates embeddings using
 sentence-transformers, and saves a FAISS index to app/data/vectorstore/.
 
 QUICK START (run from va_llm_v1 root directory):
@@ -16,6 +16,7 @@ QUICK START (run from va_llm_v1 root directory):
     # Start the FastAPI server
     python -m app.app
 
+INPUT (datasets):  app/data/datasets/
 OUTPUT:
 =======
     app/data/vectorstore/
@@ -47,11 +48,11 @@ except ImportError:
 # They are downloaded automatically on first run.
 #
 # SMALL & FAST (recommended for local dev):
-# EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # 80MB, 384 dim, FAST
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # 80MB, 384 dim, FAST
 #
 # BETTER QUALITY (still reasonable size):
 # EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"  # 120MB, 384 dim
-EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"  # 80MB, 384 dim, FAST
+# EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"  # 80MB, 384 dim, FAST
 # 
 # MULTILINGUAL (if you have non-English data):
 # EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # 470MB
@@ -107,13 +108,13 @@ def main() -> None:
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(Path("app") / "data" / "container_operations.csv"),
+        default=str(Path("app") / "data" / "datasets" / "container_operations.csv"),
         help="Primary CSV dataset (used first if --dataset-dir is set)",
     )
     parser.add_argument(
         "--dataset-dir",
         type=str,
-        default=str(Path("app") / "data"),
+        default=str(Path("app") / "data" / "datasets"),
         help="If set, embed all CSVs in this folder (recommended)",
     )
     parser.add_argument(

@@ -1,7 +1,7 @@
 """
 VaLLM Training Script - Fine-tune a Causal LLM on Cloud Operations Data
 
-This script trains a HuggingFace causal language model on multi-format data from app/data/
+This script trains a HuggingFace causal language model on multi-format data from app/data/datasets/
 Supported formats: CSV, JSON, TXT, PDF
 
 QUICK START (run from va_llm_v1 root directory):
@@ -29,10 +29,10 @@ ADVANCED OPTIONS:
     python ./app/train.py --file-types csv,json,txt,pdf
 
     # Train on a specific file only
-    python ./app/train.py --dataset ./app/data/cloud_networking.csv --dataset-dir
-    python ./app/train.py --dataset ./app/data/devopsbook1.pdf --dataset-dir
-    python ./app/train.py --dataset ./app/data/opentelemetry_observability.json --dataset-dir
-    python ./app/train.py --dataset ./app/data/cloud_operations_provisionning_knowledge1.txt --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/cloud_networking.csv --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/devopsbook1.pdf --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/opentelemetry_observability.json --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/cloud_operations_provisionning_knowledge1.txt --dataset-dir
 
 SUPPORTED FILE FORMATS:
 =======================
@@ -75,8 +75,8 @@ except ImportError:
 # ULTRA TINY (< 50MB) - Fastest, great for testing:
 # LLM_MODEL_NAME = "sshleifer/tiny-gpt2"                  # ~2MB, instant on CPU
 # LLM_MODEL_NAME = "roneneldan/TinyStories-1M"          # ~4MB, 1M params
-# LLM_MODEL_NAME = "roneneldan/TinyStories-8M"          # ~32MB, 8M params
-LLM_MODEL_NAME = "Qwen/Qwen2.5-Coder-7B-Instruct"       # ~15GB VRAM
+LLM_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"          # ~32MB, 8M params
+# LLM_MODEL_NAME = "Qwen/Qwen2.5-Coder-7B-Instruct"       # ~15GB VRAM
 # LLM_MODEL_NAME = "roneneldan/TinyStories-33M"         # ~130MB, 33M params
 #
 # FOR CPU / LOW VRAM (< 8GB) - Good quality:
@@ -683,7 +683,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(Path("app") / "data" / "cloud_recommendations.csv"),
+        default=str(Path("app") / "data" / "datasets" / "cloud_recommendations.csv"),
         help="Path to training file (CSV, JSON, TXT, or PDF)",
     )
     parser.add_argument(
@@ -691,7 +691,7 @@ def parse_args() -> TrainConfig:
         type=str,
         nargs="?",
         const="",
-        default=str(Path("app") / "data"),
+        default=str(Path("app") / "data" / "datasets"),
         help=(
             "If set, train on all supported files in this folder (recommended). "
             "Pass no value to disable and train only on --dataset."

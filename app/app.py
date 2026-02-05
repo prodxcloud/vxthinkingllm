@@ -534,9 +534,11 @@ def display_system_info(
     device: str,
     vectorstore_path: Path | None = None,
     model_path: Path | None = None,
+    datasets_dir: Path | None = None,
 ):
     """Display system configuration in Matrix style"""
-    csv_count = check_csv_files(data_dir)
+    _datasets = datasets_dir if datasets_dir is not None else data_dir / "datasets"
+    csv_count = check_csv_files(_datasets)
     vs_path = str(vectorstore_path or data_dir / "vectorstore")[-35:]
     mdl_path = str(model_path or data_dir / "model")[-35:]
 
@@ -597,9 +599,12 @@ async def lifespan(app: FastAPI):
         # Step 1: Data Directory
         display_loading_bar("Scanning data directory", 1, 6)
         data_dir = Path(__file__).parent / "data"
+        datasets_dir = data_dir / "datasets"
         if not data_dir.exists():
             data_dir.mkdir(parents=True, exist_ok=True)
-            matrix_print("    ⚠️  Data directory created. Add CSV files to app/data/", "warning")
+        if not datasets_dir.exists():
+            datasets_dir.mkdir(parents=True, exist_ok=True)
+            matrix_print("    ⚠️  Datasets directory created. Add CSV/dataset files to app/data/datasets/", "warning")
         
         # Step 2: Vector Store
         display_loading_bar("Loading vector store", 2, 6)
@@ -630,7 +635,7 @@ async def lifespan(app: FastAPI):
         else:
             # Check if we should auto-train
             if AUTO_TRAIN:
-                csv_count = check_csv_files(data_dir)
+                csv_count = check_csv_files(datasets_dir)
                 if csv_count > 0:
                     matrix_print(f"    🔄 No LLM model found. Auto-training with {csv_count} CSV files...", "warning")
                     if run_train():
@@ -642,7 +647,7 @@ async def lifespan(app: FastAPI):
                         except Exception as e:
                             matrix_print(f"    ⚠️  Error loading trained model: {e}", "warning")
                 else:
-                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/ first.", "warning")
+                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/datasets/ first.", "warning")
             else:
                 matrix_print("    ⚠️  No LLM model found.", "warning")
                 matrix_print("    📝 To train: python ./app/services/ai/ml/train.py", "info")
@@ -665,7 +670,7 @@ async def lifespan(app: FastAPI):
         else:
             # Check if we should auto-precompute
             if AUTO_PRECOMPUTE:
-                csv_count = check_csv_files(data_dir)
+                csv_count = check_csv_files(datasets_dir)
                 if csv_count > 0:
                     matrix_print(f"    🔄 No FAISS index found. Auto-building with {csv_count} CSV files...", "warning")
                     if run_precompute():
@@ -677,7 +682,7 @@ async def lifespan(app: FastAPI):
                         except Exception as e:
                             matrix_print(f"    ⚠️  Error loading built index: {e}", "warning")
                 else:
-                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/ first.", "warning")
+                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/datasets/ first.", "warning")
             else:
                 matrix_print("    ⚠️  No FAISS index found.", "warning")
                 matrix_print("    📝 To build: python -m app.services.ai.ml.precompute", "info")
@@ -701,6 +706,7 @@ async def lifespan(app: FastAPI):
             device=device,
             vectorstore_path=vectorstore_dir,
             model_path=model_dir,
+            datasets_dir=datasets_dir,
         )
         
         matrix_print("    ⚡ VALLM NEURAL NETWORK ONLINE ⚡\n", "header")

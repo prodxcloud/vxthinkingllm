@@ -32,8 +32,8 @@ CONTEXT_PREVIEW_CHARS = 220
 # QUESTIONS TO TEST
 # =============================================================================
 # Keep questions aligned to content in:
-# - app/data/cloud_recommendations.csv
-# - app/data/cloud_operations_provisionning_knowledge1.txt
+# - app/data/datasets/cloud_recommendations.csv
+# - app/data/datasets/cloud_operations_provisionning_knowledge1.txt
 QUESTIONS = [
     # Observability / tracing
     "opentelemetry traces show dropped spans at the edge ?",
