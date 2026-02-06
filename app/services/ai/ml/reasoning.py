@@ -34,7 +34,10 @@ class ReasoningEngine:
     
     async def initialize(self):
         """Initialize reasoning engine"""
-        print("🧠 Reasoning engine ready")
+        try:
+            print("🧠 Reasoning engine ready")
+        except UnicodeEncodeError:
+            print("Reasoning engine ready")
     
     async def reason(
         self,

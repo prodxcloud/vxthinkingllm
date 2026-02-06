@@ -74,7 +74,10 @@ class VectorStore:
         
         # Auto-detect CUDA for the 8B model
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"🔧 VectorStore initializing on: {self.device}")
+        try:
+            print(f"🔧 VectorStore initializing on: {self.device}")
+        except UnicodeEncodeError:
+            print(f"VectorStore initializing on: {self.device}")
 
     async def initialize(self):
         """Initialize the vector store - load model and handle IndexFlatIP"""

@@ -37,14 +37,12 @@ USAGE:
     # Quick start
     python -m app.app
 
-    # With auto-train enabled
-    set VALLM_AUTO_TRAIN=true && python -m app.app  (Windows)
-    VALLM_AUTO_TRAIN=true python -m app.app         (Linux/Mac)
+    # Auto-train is on by default; set VALLM_AUTO_TRAIN=false to disable
 
 ENVIRONMENT VARIABLES:
 ======================
     VALLM_AUTO_PRECOMPUTE=true  (default: true)  - Auto-build FAISS if missing
-    VALLM_AUTO_TRAIN=true       (default: false) - Auto-train LLM if missing
+    VALLM_AUTO_TRAIN=true       (default: true)  - Auto-train LLM if missing
     USE_CUDA=true               (default: false) - Use GPU for inference
     VALLM_CACHE_EMBEDDINGS=true (default: true)  - Cache query embeddings (L1, TTL 1h)
     VALLM_CACHE_SEARCH=true     (default: true)  - Cache search results (L2, TTL 30m)
@@ -94,7 +92,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 import faiss
 import torch
@@ -111,7 +109,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # Set to True to automatically run precompute.py when FAISS index is missing
 AUTO_PRECOMPUTE = os.getenv("VALLM_AUTO_PRECOMPUTE", "true").lower() == "true"
 # Set to True to automatically run train.py when model is missing (takes longer!)
-AUTO_TRAIN = os.getenv("VALLM_AUTO_TRAIN", "false").lower() == "true"
+AUTO_TRAIN = os.getenv("VALLM_AUTO_TRAIN", "true").lower() == "true"
 
 # =============================================================================
 # LOGGING CONFIGURATION
@@ -324,78 +322,142 @@ model = None
 faiss_index = None
 
 
+def _run_subprocess_with_progress(cmd: list, cwd: str, timeout_seconds: int = 3600, label: str = "Process"):
+    """Run a subprocess and stream stdout/stderr so progress is visible in real time."""
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    # Use UTF-8 for subprocess stdout so emoji/special chars work on Windows (avoid cp1252 UnicodeEncodeError)
+    if sys.platform == "win32":
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=env,
+        )
+        for line in proc.stdout or []:
+            line = line.rstrip()
+            if line:
+                print(f"    \033[90m[{label}] {line}\033[0m")
+        proc.wait(timeout=timeout_seconds)
+        return proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        print(f"\n    \033[93m⚠️  {label} timed out after {timeout_seconds}s\033[0m")
+        return -1
+    except Exception as e:
+        print(f"\n    \033[91m❌ {label} error: {e}\033[0m")
+        return -1
+
+
 def run_precompute():
-    """Run precompute.py to build FAISS index"""
+    """Run precompute.py to build FAISS index; streams progress to console."""
     print("\n" + "=" * 70)
-    print("🔧 AUTO-PRECOMPUTE: Building FAISS index...")
+    print("🔧 AUTO-PRECOMPUTE: Building FAISS index (progress below)...")
     print("=" * 70 + "\n")
-    
-    # Precompute lives under app/services/ai/ml/
     precompute_script = Path(__file__).parent / "services" / "ai" / "ml" / "precompute.py"
-    
     if not precompute_script.exists():
         print("    ❌ precompute.py not found!")
         return False
-    
-    try:
-        # Run precompute as module so package imports work
-        result = subprocess.run(
-            [sys.executable, "-m", "app.services.ai.ml.precompute"],
-            cwd=str(Path(__file__).parent.parent),  # Run from project root
-            capture_output=False,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            print("\n    ✅ FAISS index built successfully!")
-            return True
-        else:
-            print(f"\n    ❌ Precompute failed with code: {result.returncode}")
-            return False
-            
-    except Exception as e:
-        print(f"\n    ❌ Error running precompute: {e}")
-        return False
+    cwd = str(Path(__file__).parent.parent)
+    code = _run_subprocess_with_progress(
+        [sys.executable, "-m", "app.services.ai.ml.precompute"],
+        cwd=cwd,
+        timeout_seconds=600,
+        label="precompute",
+    )
+    if code == 0:
+        print("\n    ✅ FAISS index built successfully!")
+        return True
+    print(f"\n    ❌ Precompute failed with code: {code}")
+    return False
 
 
 def run_train():
-    """Run train.py to build LLM model"""
+    """Run train.py to build LLM model; streams training progress (epochs, loss) to console."""
     print("\n" + "=" * 70)
-    print("🔧 AUTO-TRAIN: Training LLM model (this may take several minutes)...")
+    print("🔧 AUTO-TRAIN: Training LLM model — watch progress below (epochs, loss)...")
     print("=" * 70 + "\n")
-    
-    # Get the path to train.py
-    train_script = Path(__file__).parent / "train.py"
-    
-    if not train_script.exists():
+    train_module = Path(__file__).parent / "services" / "ai" / "ml" / "train.py"
+    if not train_module.exists():
         print("    ❌ train.py not found!")
         return False
-    
-    try:
-        # Run train.py with 1 epoch for speed
-        result = subprocess.run(
-            [sys.executable, str(train_script), "--num-train-epochs", "1"],
-            cwd=str(Path(__file__).parent.parent),  # Run from project root
-            capture_output=False,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            print("\n    ✅ LLM model trained successfully!")
-            return True
-        else:
-            print(f"\n    ❌ Training failed with code: {result.returncode}")
-            return False
-            
-    except Exception as e:
-        print(f"\n    ❌ Error running train: {e}")
-        return False
+    cwd = str(Path(__file__).parent.parent)
+    code = _run_subprocess_with_progress(
+        [sys.executable, "-m", "app.services.ai.ml.train", "--num-train-epochs", "1"],
+        cwd=cwd,
+        timeout_seconds=3600,
+        label="train",
+    )
+    if code == 0:
+        print("\n    ✅ LLM model trained successfully!")
+        return True
+    print(f"\n    ❌ Training failed with code: {code}")
+    return False
 
 
 def check_csv_files(data_dir: Path) -> int:
     """Check how many CSV files exist in data directory"""
     csv_files = list(data_dir.glob("*.csv"))
     return len(csv_files)
+
+
+def _gather_model_info(model_dir: Path) -> Dict[str, Any]:
+    """Read trained model metadata from model_dir/config.json."""
+    info: Dict[str, Any] = {"available": False}
+    config_path = model_dir / "config.json"
+    if not config_path.exists():
+        return info
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        info["available"] = True
+        info["architecture"] = (cfg.get("architectures") or ["unknown"])[0]
+        info["model_type"] = cfg.get("model_type", "unknown")
+        info["hidden_size"] = cfg.get("hidden_size", "?")
+        info["num_layers"] = cfg.get("num_hidden_layers", "?")
+        info["attention_heads"] = cfg.get("num_attention_heads", "?")
+        info["vocab_size"] = cfg.get("vocab_size", "?")
+        checkpoints = sorted(d.name for d in model_dir.iterdir() if d.is_dir() and d.name.startswith("checkpoint-"))
+        info["checkpoints"] = checkpoints
+        safetensors = model_dir / "model.safetensors"
+        if safetensors.exists():
+            info["model_size_mb"] = round(safetensors.stat().st_size / (1024 * 1024), 1)
+    except Exception:
+        pass
+    return info
+
+
+def _gather_vectorstore_info(vectorstore_dir: Path, vector_count: int, datasets_dir: Path) -> Dict[str, Any]:
+    """Gather vectorstore and dataset metadata for display."""
+    info: Dict[str, Any] = {"vector_count": vector_count}
+    faiss_file = vectorstore_dir / "faiss_index.bin"
+    docs_file = vectorstore_dir / "documents.pkl"
+    if faiss_file.exists():
+        info["index_size_mb"] = round(faiss_file.stat().st_size / (1024 * 1024), 1)
+    if docs_file.exists():
+        info["docs_size_mb"] = round(docs_file.stat().st_size / (1024 * 1024), 1)
+    if datasets_dir.exists():
+        dataset_files = sorted(
+            p.name for p in datasets_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".csv", ".txt", ".sql", ".md", ".pdf", ".json"}
+        )
+        info["dataset_files"] = dataset_files
+    return info
+
+
+def _pad(text: str, width: int = 35) -> str:
+    """Pad text for box alignment."""
+    s = str(text)
+    return (s[: width - 2] + "..") if len(s) > width else f"{s:<{width}}"
 
 
 def matrix_print(text: str, style: str = "info"):
@@ -478,54 +540,92 @@ def display_system_info(
     vectorstore_path: Path | None = None,
     model_path: Path | None = None,
     datasets_dir: Path | None = None,
+    model_info: Dict[str, Any] | None = None,
+    vs_info: Dict[str, Any] | None = None,
 ):
-    """Display system configuration in Matrix style"""
+    """Display system configuration with datasets, model architecture, and vectorstore details."""
     _datasets = datasets_dir if datasets_dir is not None else data_dir / "datasets"
     csv_count = check_csv_files(_datasets)
-    vs_path = str(vectorstore_path or data_dir / "vectorstore")[-35:]
-    mdl_path = str(model_path or data_dir / "model")[-35:]
+    vs_path = vectorstore_path or data_dir / "vectorstore"
+    mdl_path = model_path or data_dir / "model"
+    model_info = model_info or _gather_model_info(Path(mdl_path))
+    vs_info = vs_info or _gather_vectorstore_info(Path(vs_path), vector_count, Path(_datasets))
+    vs_str = _pad(str(vs_path)[-38:], 38)
+    mdl_str = _pad(str(mdl_path)[-38:], 38)
 
     try:
         print("\033[92m")
         print("    ┌─────────────────────────────────────────────────────────┐")
         print("    │                  SYSTEM CONFIGURATION                   │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print(f"    │  📂 Data Directory    : {str(data_dir)[-35:]:<35} │")
-        print(f"    │  📦 Vectorstore Path  : {vs_path:<35} │")
-        print(f"    │  🤖 Model Path        : {mdl_path:<35} │")
-        print(f"    │  📄 CSV Files         : {csv_count:<35} │")
-        print(f"    │  🤖 LLM Model         : {'✅ LOADED' if model_loaded else '❌ NOT LOADED':<35} │")
-        print(f"    │  📊 Vector Count      : {vector_count:<35} │")
-        print(f"    │  💻 Compute Device    : {device.upper():<35} │")
-        print(f"    │  🔧 Embedding Model   : all-MiniLM-L6-v2{' '*18} │")
-        print(f"    │  📝 Log File          : app/logs/logs.txt{' '*17} │")
+        print(f"    │  📂 Data Directory    : {_pad(str(data_dir)[-38:], 38)} │")
+        print(f"    │  📦 Vectorstore       : {vs_str} │")
+        print(f"    │  🤖 Model Path        : {mdl_str} │")
+        print(f"    │  🤖 LLM Model         : {_pad('✅ LOADED' if model_loaded else '❌ NOT LOADED')} │")
+        print(f"    │  📊 Vector Count      : {_pad(str(vector_count))} │")
+        print(f"    │  💻 Compute Device    : {_pad(device.upper())} │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print("    │                    AUTO-BUILD SETTINGS                  │")
+        print("    │              EMBEDDING & VECTOR STORE                    │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print(f"    │  🔄 Auto-Precompute   : {'ON' if AUTO_PRECOMPUTE else 'OFF':<35} │")
-        print(f"    │  🔄 Auto-Train        : {'ON' if AUTO_TRAIN else 'OFF':<35} │")
+        print(f"    │  🔧 Embedding Model   : {_pad('all-MiniLM-L6-v2')} │")
+        idx_mb = vs_info.get("index_size_mb", "?")
+        doc_mb = vs_info.get("docs_size_mb", "?")
+        print(f"    │  💾 Index / Docs      : {_pad(f'{idx_mb} MB / {doc_mb} MB')} │")
+        ds_files = vs_info.get("dataset_files", [])
+        if ds_files:
+            print(f"    │  📂 Datasets (used)  : {_pad(str(len(ds_files)) + ' files')} │")
+            for name in ds_files[:5]:
+                print(f"    │     · {_pad(name, 54)} │")
+            if len(ds_files) > 5:
+                print(f"    │     ... +{len(ds_files) - 5} more{' ' * 46} │")
+        else:
+            print(f"    │  📂 Datasets         : {_pad('none (add CSV/txt to data/datasets/)')} │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print("    │                    API ENDPOINTS                        │")
+        print("    │                  TRAINED MODEL (LLM)                     │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print("    │  GET  /health                      Health check         │")
-        print("    │  GET  /logs                        View recent logs     │")
-        print("    │  POST /search                      Vector search        │")
-        print("    │  POST /generate                    LLM generation       │")
-        print("    │  POST /api/model/v1/query          RAG + Reasoning      │")
-        print("    │  POST /api/model/v2/query          NLP + Documents      │")
-        print("    │  POST /api/model/v3/query          Incident Patterns    │")
+        if model_info.get("available"):
+            print(f"    │  🏗️  Architecture      : {_pad(model_info.get('architecture', '?'))} │")
+            arch = f"{model_info.get('model_type','?')} | {model_info.get('num_layers','?')}L / {model_info.get('attention_heads','?')}H"
+            print(f"    │  📏 Structure         : {_pad(arch)} │")
+            print(f"    │  📖 Vocab Size        : {_pad(str(model_info.get('vocab_size', '?')))} │")
+            sz = model_info.get("model_size_mb", "?")
+            print(f"    │  💾 Model Size        : {_pad(f'{sz} MB')} │")
+        else:
+            print(f"    │  ⚠️  Status            : {_pad('NOT FOUND (run train; auto-train is default)')} │")
+        print("    ├─────────────────────────────────────────────────────────┤")
+        print("    │  🔄 Auto-Precompute   : " + _pad("ON" if AUTO_PRECOMPUTE else "OFF") + " │")
+        print("    │  🔄 Auto-Train        : " + _pad("ON" if AUTO_TRAIN else "OFF") + " │")
+        print("    ├─────────────────────────────────────────────────────────┤")
+        print("    │  GET  /health          POST /api/model/v1/query (RAG)   │")
+        print("    │  GET  /logs            POST /api/model/v2/query (NLP)   │")
+        print("    │  POST /api/model/v3/query (Incident patterns)            │")
         print("    └─────────────────────────────────────────────────────────┘")
         print("\033[0m")
+
+        if vector_count == 0 or not model_loaded:
+            print("\033[93m")
+            print("    ┌─────────────────────────────────────────────────────────┐")
+            print("    │                    ⚠️  SETUP REQUIRED                   │")
+            print("    ├─────────────────────────────────────────────────────────┤")
+            if vector_count == 0:
+                print("    │  Vector store missing or empty. To enable semantic search:  │")
+                print("    │  1. Add CSV/text files to app/data/datasets/                 │")
+                print("    │  2. Run: python -m app.services.ai.ml.precompute            │")
+                print("    │  Or set VALLM_AUTO_PRECOMPUTE=true (default) to auto-build.   │")
+            if not model_loaded:
+                print("    │  LLM model not found. To enable generation:                   │")
+                print("    │  Run: python -m app.services.ai.ml.train                     │")
+                print("    │  Auto-train is on by default; add data and restart.          │")
+            print("    └─────────────────────────────────────────────────────────┘")
+            print("\033[0m")
     except UnicodeEncodeError:
         print("\033[92m")
         print("    --- SYSTEM CONFIGURATION ---")
-        print(f"    Data Directory    : {str(data_dir)[-35:]}")
-        print(f"    Vectorstore Path  : {vs_path}")
-        print(f"    Model Path        : {mdl_path}")
-        print(f"    CSV Files         : {csv_count}")
-        print(f"    LLM Model         : {'LOADED' if model_loaded else 'NOT LOADED'}")
-        print(f"    Vector Count      : {vector_count}")
-        print(f"    Compute Device    : {device.upper()}")
+        print(f"    Data Dir: {data_dir} | Vectors: {vector_count} | Model: {'LOADED' if model_loaded else 'NOT LOADED'}")
+        if model_info.get("available"):
+            print(f"    Model: {model_info.get('architecture', '?')} | {model_info.get('num_layers')}L")
+        if vector_count == 0 or not model_loaded:
+            print("    SETUP: Add data to data/datasets/, run precompute and/or train.")
         print("\033[0m")
 
 
@@ -539,33 +639,57 @@ async def lifespan(app: FastAPI):
     matrix_print("\n    ⚡ INITIALIZING NEURAL NETWORK SYSTEMS...\n", "header")
     
     try:
-        # Step 1: Data Directory
-        display_loading_bar("Scanning data directory", 1, 6)
+        # Step 1: Data directory and paths
+        display_loading_bar("Scanning data directory", 1, 7)
         data_dir = Path(__file__).parent / "data"
         datasets_dir = data_dir / "datasets"
+        vectorstore_dir = data_dir / "vectorstore"
+        faiss_index_path = vectorstore_dir / "faiss_index.bin"
+        documents_file = vectorstore_dir / "documents.pkl"
+        model_dir = data_dir / "model"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         if not data_dir.exists():
             data_dir.mkdir(parents=True, exist_ok=True)
         if not datasets_dir.exists():
             datasets_dir.mkdir(parents=True, exist_ok=True)
             matrix_print("    ⚠️  Datasets directory created. Add CSV/dataset files to app/data/datasets/", "warning")
-        
-        # Step 2: Vector Store
-        display_loading_bar("Loading vector store", 2, 6)
+        csv_count = check_csv_files(datasets_dir)
+
+        # Step 2: Auto-build vectorstore and/or model if missing or empty
+        display_loading_bar("Checking vectorstore and model", 2, 7)
+        vectorstore_missing = not faiss_index_path.exists() or not documents_file.exists()
+        model_missing = not (model_dir / "config.json").exists()
+        if vectorstore_missing and AUTO_PRECOMPUTE and csv_count > 0:
+            matrix_print(f"    🔄 Vectorstore missing or empty — running precompute ({csv_count} dataset files)...", "warning")
+            if run_precompute():
+                matrix_print("    ✓ Precompute completed", "success")
+            else:
+                matrix_print("    ⚠️  Precompute failed; continuing without index", "warning")
+        if model_missing and AUTO_TRAIN and csv_count > 0:
+            matrix_print(f"    🔄 Model missing — running training ({csv_count} dataset files)...", "warning")
+            if run_train():
+                matrix_print("    ✓ Training completed", "success")
+            else:
+                matrix_print("    ⚠️  Training failed; continuing without model", "warning")
+        if (vectorstore_missing or model_missing) and csv_count == 0:
+            matrix_print("    ⚠️  No dataset files in app/data/datasets/ — add CSV/text to enable auto-build", "warning")
+
+        # Step 3: Vector store
+        display_loading_bar("Loading vector store", 3, 7)
         vector_store = VectorStore(data_dir=str(data_dir))
         await vector_store.initialize()
         matrix_print("    ✓ Vector store initialized", "success")
-        
-        # Step 3: Reasoning Engine
-        display_loading_bar("Initializing reasoning engine", 3, 6)
+
+        # Step 4: Reasoning engine
+        display_loading_bar("Initializing reasoning engine", 4, 7)
         reasoning_engine = ReasoningEngine(vector_store)
         await reasoning_engine.initialize()
         matrix_print("    ✓ Reasoning engine online", "success")
-        
-        # Step 4: LLM Model
-        display_loading_bar("Loading LLM model", 4, 6)
-        model_dir = data_dir / "model"
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
+
+        # Step 5: LLM model
+        display_loading_bar("Loading LLM model", 5, 7)
+        tokenizer = None
+        model = None
         if model_dir.exists() and (model_dir / "config.json").exists():
             try:
                 tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
@@ -573,35 +697,14 @@ async def lifespan(app: FastAPI):
                 matrix_print(f"    ✓ LLM model loaded → {device.upper()}", "success")
             except Exception as e:
                 matrix_print(f"    ⚠️  LLM model error: {e}", "warning")
-                tokenizer = None
-                model = None
         else:
-            # Check if we should auto-train
-            if AUTO_TRAIN:
-                csv_count = check_csv_files(datasets_dir)
-                if csv_count > 0:
-                    matrix_print(f"    🔄 No LLM model found. Auto-training with {csv_count} CSV files...", "warning")
-                    if run_train():
-                        # Reload model after training
-                        try:
-                            tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
-                            model = AutoModelForCausalLM.from_pretrained(str(model_dir)).to(device)
-                            matrix_print(f"    ✓ LLM model trained and loaded → {device.upper()}", "success")
-                        except Exception as e:
-                            matrix_print(f"    ⚠️  Error loading trained model: {e}", "warning")
-                else:
-                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/datasets/ first.", "warning")
-            else:
-                matrix_print("    ⚠️  No LLM model found.", "warning")
-                matrix_print("    📝 To train: python ./app/services/ai/ml/train.py", "info")
-                matrix_print("    💡 Or set VALLM_AUTO_TRAIN=true to auto-train on startup", "info")
-        
-        # Step 5: FAISS Index
-        display_loading_bar("Loading FAISS vector index", 5, 6)
-        vectorstore_dir = data_dir / "vectorstore"
-        faiss_index_path = vectorstore_dir / "faiss_index.bin"
+            matrix_print("    ⚠️  No LLM model found.", "warning")
+            matrix_print("    📝 Run: python -m app.services.ai.ml.train  (auto-train is default)", "info")
+
+        # Step 6: FAISS index and vector count
+        display_loading_bar("Loading FAISS vector index", 6, 7)
         vector_count = 0
-        
+        faiss_index = None
         if faiss_index_path.exists():
             try:
                 faiss_index = faiss.read_index(str(faiss_index_path))
@@ -609,39 +712,19 @@ async def lifespan(app: FastAPI):
                 matrix_print(f"    ✓ FAISS index loaded → {vector_count} vectors", "success")
             except Exception as e:
                 matrix_print(f"    ⚠️  FAISS error: {e}", "warning")
-                faiss_index = None
         else:
-            # Check if we should auto-precompute
-            if AUTO_PRECOMPUTE:
-                csv_count = check_csv_files(datasets_dir)
-                if csv_count > 0:
-                    matrix_print(f"    🔄 No FAISS index found. Auto-building with {csv_count} CSV files...", "warning")
-                    if run_precompute():
-                        # Reload FAISS after building
-                        try:
-                            faiss_index = faiss.read_index(str(faiss_index_path))
-                            vector_count = faiss_index.ntotal
-                            matrix_print(f"    ✓ FAISS index built and loaded → {vector_count} vectors", "success")
-                        except Exception as e:
-                            matrix_print(f"    ⚠️  Error loading built index: {e}", "warning")
-                else:
-                    matrix_print("    ⚠️  No CSV files found. Add data to app/data/datasets/ first.", "warning")
-            else:
-                matrix_print("    ⚠️  No FAISS index found.", "warning")
-                matrix_print("    📝 To build: python -m app.services.ai.ml.precompute", "info")
-                matrix_print("    💡 Or set VALLM_AUTO_PRECOMPUTE=true (default) to auto-build", "info")
-        
-        # Step 6: Final Setup
-        display_loading_bar("Completing initialization", 6, 7)
-        
-        # Store in app state
+            matrix_print("    ⚠️  No FAISS index; run precompute or set VALLM_AUTO_PRECOMPUTE=true", "warning")
+
+        # Step 7: App state and system info
+        display_loading_bar("Completing initialization", 7, 7)
         app.state.vector_store = vector_store
         app.state.reasoning_engine = reasoning_engine
         app.state.tokenizer = tokenizer
         app.state.model = model
         app.state.faiss_index = faiss_index
-        
-        # Display system info
+
+        model_info = _gather_model_info(model_dir)
+        vs_info = _gather_vectorstore_info(vectorstore_dir, vector_count, datasets_dir)
         display_system_info(
             data_dir=data_dir,
             model_loaded=(model is not None),
@@ -650,6 +733,8 @@ async def lifespan(app: FastAPI):
             vectorstore_path=vectorstore_dir,
             model_path=model_dir,
             datasets_dir=datasets_dir,
+            model_info=model_info,
+            vs_info=vs_info,
         )
         
         matrix_print("    ⚡ VALLM NEURAL NETWORK ONLINE ⚡\n", "header")
