@@ -17,24 +17,30 @@ def load_env():
 
 load_env()
 
+# Single source of truth for PostgreSQL connection (database: vacloudopsdb1)
+def get_db_config():
+    """Return dict with keys: database, user, password, host, port. Used by settings and platform database."""
+    return {
+        "database": os.environ.get("POSTGRES_DB", "vacloudopsdb1"),
+        "user": os.environ.get("POSTGRES_USER", "postgres"),
+        "password": os.environ.get("POSTGRES_PASSWORD", "postgres"),
+        "host": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+        "port": int(os.environ.get("POSTGRES_PORT", "5432")),
+    }
+
+
 async def create_async_connection_pool():
-    POSTGRES_DB = os.environ.get('POSTGRES_DB', 'vacloudopsdb1')
-    POSTGRES_USER = os.environ.get('POSTGRES_USER', 'postgres')
-    POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'postgres')
-    POSTGRES_HOST = os.environ.get('POSTGRES_HOST', '127.0.0.1')
-    POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', 5432))
-    
-    # Add timeout to prevent hanging (5 seconds for connection)
+    cfg = get_db_config()
     connection_timeout = float(os.environ.get('DB_CONNECTION_TIMEOUT', '5.0'))
 
     try:
         pool = await asyncio.wait_for(
             asyncpg.create_pool(
-                database=POSTGRES_DB,
-                user=POSTGRES_USER,
-                password=POSTGRES_PASSWORD,
-                host=POSTGRES_HOST,
-                port=POSTGRES_PORT,
+                database=cfg["database"],
+                user=cfg["user"],
+                password=cfg["password"],
+                host=cfg["host"],
+                port=cfg["port"],
                 min_size=1,
                 max_size=10,
                 command_timeout=10.0  # 10 seconds for queries
@@ -69,17 +75,13 @@ async def close_db_connection_pool():
         async_pool = None
         print("Async connection pool closed.")
 
-# Keep the old synchronous function for compatibility if it's used elsewhere, but mark it for future removal
+# Keep the old synchronous function for compatibility if it's used elsewhere
 def basic_postgres_connection():
-    POSTGRES_DB = os.environ.get('POSTGRES_DB', 'vacloudopsdb1')
-    POSTGRES_USER = os.environ.get('POSTGRES_USER', 'postgres')
-    POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'postgres')
-    POSTGRES_HOST = os.environ.get('POSTGRES_HOST', '127.0.0.1')
-    POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', 5432))
+    cfg = get_db_config()
     return psycopg2.connect(
-        dbname=POSTGRES_DB,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        host=POSTGRES_HOST,
-        port=POSTGRES_PORT
+        dbname=cfg["database"],
+        user=cfg["user"],
+        password=cfg["password"],
+        host=cfg["host"],
+        port=cfg["port"],
     ) 

@@ -55,9 +55,6 @@ API ENDPOINTS:
 ==============
     Core:
         GET  /health              - Health check
-        GET  /health/ready        - Readiness probe (enhanced)
-        GET  /health/live         - Liveness probe (enhanced)
-        GET  /metrics             - Prometheus metrics
         GET  /logs                - View recent logs
         POST /search              - Vector similarity search
         POST /generate            - LLM text generation
@@ -291,33 +288,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 response_preview=response_preview
             )
             
-            # Record Prometheus metrics (if available)
-            try:
-                try:
-                    from .services.ai.ml.metrics import (
-                        http_requests_total,
-                        http_request_duration_seconds,
-                        normalize_path
-                    )
-                except ImportError:
-                    from services.ai.ml.metrics import (
-                        http_requests_total,
-                        http_request_duration_seconds,
-                        normalize_path
-                    )
-                normalized_path = normalize_path(str(request.url.path))
-                http_requests_total.labels(
-                    method=request.method,
-                    endpoint=normalized_path,
-                    status_code=response.status_code
-                ).inc()
-                http_request_duration_seconds.labels(
-                    method=request.method,
-                    endpoint=normalized_path
-                ).observe(duration_seconds)
-            except ImportError:
-                pass  # Metrics not available, continue without them
-            
             # Add request ID to response headers
             response.headers["X-Request-ID"] = request_id
             
@@ -326,33 +296,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             duration_seconds = duration_ms / 1000
-            
-            # Record error metrics (if available)
-            try:
-                try:
-                    from .services.ai.ml.metrics import (
-                        http_requests_total,
-                        errors_total,
-                        normalize_path
-                    )
-                except ImportError:
-                    from services.ai.ml.metrics import (
-                        http_requests_total,
-                        errors_total,
-                        normalize_path
-                    )
-                normalized_path = normalize_path(str(request.url.path))
-                http_requests_total.labels(
-                    method=request.method,
-                    endpoint=normalized_path,
-                    status_code=500
-                ).inc()
-                errors_total.labels(
-                    error_type=type(e).__name__,
-                    endpoint=normalized_path
-                ).inc()
-            except ImportError:
-                pass
             
             logger.error(f"✗ Error: {str(e)} | {duration_ms:.2f}ms")
             raise
@@ -502,7 +445,7 @@ def display_matrix_banner():
     │          V E C T O R - A U G M E N T E D   L O C A L   L A N G U A G E        │
     │                              M O D E L                                        │
     │                                                                              │
-    │           Cloud Operations  •  DevOps Intelligence  •  RAG Engine            │
+    │           Cloud Operations  •  DevOps Intelligence  •  Fine Funed Model           │
     │                                                                              │
     └──────────────────────────────────────────────────────────────────────────────┘
 \033[0m"""
@@ -779,9 +722,9 @@ app.add_middleware(RequestLoggingMiddleware)
 # Optional: Legacy rate limiting middleware (if enabled)
 try:
     try:
-        from .services.ai.ml.rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
+        from .auth.rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
     except ImportError:
-        from services.ai.ml.rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
+        from auth.rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
     if RATE_LIMIT_ENABLED:
         app.add_middleware(RateLimitMiddleware)
         logger.info("✅ Legacy rate limiting enabled")
@@ -812,9 +755,9 @@ app.add_middleware(
 # Optional: Setup JSON logging (if enabled)
 try:
     try:
-        from .services.ai.ml.logging_config import setup_json_logging
+        from .core.logging_config import setup_json_logging
     except ImportError:
-        from services.ai.ml.logging_config import setup_json_logging
+        from core.logging_config import setup_json_logging
     setup_json_logging()
 except ImportError:
     pass
@@ -918,56 +861,6 @@ async def root():
 async def health():
     """Basic health check (for load balancers) - unchanged"""
     return {"status": "healthy"}
-
-
-# Optional: Enhanced health checks
-try:
-    try:
-        from .services.ai.ml.health import HealthChecker
-    except ImportError:
-        from services.ai.ml.health import HealthChecker
-
-    @app.get("/health/ready")
-    async def readiness():
-        """Readiness probe - checks if service can accept traffic"""
-        checker = HealthChecker(app.state)
-        health_data = await checker.check_health()
-
-        if health_data["status"] != "healthy":
-            from fastapi import HTTPException
-            raise HTTPException(status_code=503, detail=health_data)
-
-        return health_data
-
-    @app.get("/health/live")
-    async def liveness():
-        """Liveness probe - checks if service is alive"""
-        return {"status": "alive"}
-except ImportError:
-    pass
-
-
-# Prometheus metrics endpoint
-# Access at: http://localhost:8000/metrics
-try:
-    try:
-        from .services.ai.ml.metrics import get_metrics_response
-    except ImportError:
-        from services.ai.ml.metrics import get_metrics_response
-
-    @app.get("/metrics")
-    async def metrics():
-        """
-        Prometheus metrics endpoint
-
-        Returns metrics in Prometheus format for scraping.
-        Access at: http://localhost:8000/metrics
-        """
-        return get_metrics_response()
-except ImportError:
-    # Metrics not available if prometheus-client not installed
-    logger.warning("Prometheus metrics not available (prometheus-client not installed)")
-    pass
 
 
 @app.get("/logs")

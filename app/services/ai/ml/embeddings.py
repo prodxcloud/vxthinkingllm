@@ -37,18 +37,10 @@ except ImportError:
     def _normalize_query(q: str) -> str: return " ".join(q.strip().split()) if q else ""
     def _search_key(query: str, top_k: int, filter_type) -> str: return f"{_normalize_query(query)}|{top_k}|{filter_type or ''}"
 
-try:
-    from .metrics import (
-        embedding_cache_hits,
-        embedding_cache_misses,
-        search_cache_hits,
-        search_cache_misses,
-    )
-    _METRICS_AVAILABLE = True
-except ImportError:
-    _METRICS_AVAILABLE = False
-    embedding_cache_hits = embedding_cache_misses = None
-    search_cache_hits = search_cache_misses = None
+# Metrics removed; use services/monitoring for observability if needed.
+_METRICS_AVAILABLE = False
+embedding_cache_hits = embedding_cache_misses = None
+search_cache_hits = search_cache_misses = None
 
 # ============================================================================
 # HARDCODED EMBEDDING MODEL CONFIGURATION

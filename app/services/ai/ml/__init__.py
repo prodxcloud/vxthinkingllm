@@ -8,15 +8,6 @@ __version__ = "1.0.0"
 from .embeddings import VectorStore, embedding_service
 from .reasoning import ReasoningEngine
 from .cache import TTLCache, get_embedding_cache, get_search_cache, get_all_cache_stats
-from .metrics import (
-    http_requests_total,
-    http_request_duration_seconds,
-    errors_total,
-    get_metrics_response,
-    normalize_path,
-)
-from .health import HealthChecker
-from .rate_limit import RateLimitMiddleware, RATE_LIMIT_ENABLED
 
 # Routes
 from .routes import router, router_v2, router_v3
@@ -31,17 +22,6 @@ __all__ = [
     "get_embedding_cache",
     "get_search_cache",
     "get_all_cache_stats",
-    # Metrics
-    "http_requests_total",
-    "http_request_duration_seconds",
-    "errors_total",
-    "get_metrics_response",
-    "normalize_path",
-    # Health
-    "HealthChecker",
-    # Rate limiting
-    "RateLimitMiddleware",
-    "RATE_LIMIT_ENABLED",
     # Routes
     "router",
     "router_v2",
