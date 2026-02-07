@@ -29,9 +29,8 @@ ADVANCED OPTIONS:
     python ./app/train.py --file-types csv,json,txt,pdf
 
     # Train on a specific file only
-    python ./app/train.py --dataset ./app/data/datasets/cloud_networking.csv --dataset-dir
-    python ./app/train.py --dataset ./app/data/datasets/devopsbook1.pdf --dataset-dir
-    python ./app/train.py --dataset ./app/data/datasets/opentelemetry_observability.json --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/cloud_deployments.csv --dataset-dir
+    python ./app/train.py --dataset ./app/data/datasets/deployments.json --dataset-dir
     python ./app/train.py --dataset ./app/data/datasets/cloud_operations_provisionning_knowledge1.txt --dataset-dir
 
 SUPPORTED FILE FORMATS:
@@ -122,7 +121,7 @@ class TrainConfig:
 def row_to_text(row: Dict) -> str:
     """Convert one CSV row into a single training text.
 
-    For observability events, a compact key/value representation works well.
+    For deployment/provisioning JSON, a compact key/value representation works well.
     """
     parts: List[str] = []
     for k, v in row.items():
@@ -135,7 +134,7 @@ def row_to_text(row: Dict) -> str:
 
     # A simple instruction prefix encourages instruction-following behavior.
     return (
-        "You are an AI assistant for cloud observability. "
+        "You are an AI assistant for cloud provisioning and deployment. "
         "Analyze the following telemetry record and provide insights.\n\n"
         + " | ".join(parts)
         + "\n\nAnswer:"
@@ -164,10 +163,8 @@ def load_json_file(file_path: Path) -> List[Dict]:
                 rows.append({"content": str(item), "source": file_path.name})
     elif isinstance(data, dict):
         # Check for common nested structures
-        # OpenTelemetry-style: {"metrics": [...], "logs": [...], "traces": [...]}
-        nested_keys = ['metrics', 'logs', 'traces', 'spans', 'events',
-                       'records', 'data', 'items', 'entries', 'samples',
-                       'kubernetes', 'vm', 'websites', 'configurations']
+        # Deployment-style: {"use_cases": [...]} or generic {"data": [...], "items": [...]}
+        nested_keys = ['use_cases', 'deployments', 'records', 'data', 'items', 'entries']
 
         found_nested = False
         for key in nested_keys:
@@ -267,21 +264,18 @@ def json_row_to_text(row: Dict) -> str:
 
     parts: List[str] = []
 
-    # Add context prefix based on category
+    # Add context prefix for provisioning/deployment
     if category:
         category_prompts = {
-            'metrics': "Analyze the following cloud metric and provide insights on performance and optimization:",
-            'logs': "Analyze the following log entry and identify any issues or patterns:",
-            'traces': "Analyze the following distributed trace and identify performance bottlenecks:",
-            'spans': "Analyze the following trace span and explain its significance:",
-            'kubernetes': "Analyze the following Kubernetes observability configuration:",
-            'vm': "Analyze the following VM monitoring configuration:",
-            'websites': "Analyze the following website monitoring setup:",
-            'configurations': "Analyze the following observability configuration:",
+            'use_cases': "Provisioning use case. Deploy or create the following:",
+            'deployments': "Deployment configuration. Provision the following:",
+            'data': "Cloud provisioning data:",
+            'items': "Provisioning item:",
+            'records': "Deployment record:",
         }
-        prefix = category_prompts.get(category, f"Analyze the following {category} data:")
+        prefix = category_prompts.get(category, f"Cloud provisioning - {category}:")
     else:
-        prefix = "You are an AI assistant for cloud observability. Analyze the following data:"
+        prefix = "You are an AI assistant for cloud provisioning and deployment. Use the following:"
 
     for k, v in row.items():
         if v is None:
@@ -291,7 +285,7 @@ def json_row_to_text(row: Dict) -> str:
             continue
         parts.append(f"{k}: {sv}")
 
-    return f"{prefix}\n\n" + " | ".join(parts) + "\n\nAnswer:"
+    return f"{prefix}\n\n" + " | ".join(parts) + "\n\nSummary:"
 
 
 def txt_row_to_text(row: Dict) -> str:
@@ -424,9 +418,14 @@ def train(cfg: TrainConfig) -> None:
         frames = []
         total_files = 0
 
+        # Skip non-provisioning datasets (observability, troubleshooting)
+        def _skip_non_provisioning(path: Path) -> bool:
+            name = path.name.lower()
+            return "observability" in name or "troubleshoot" in name or "incident" in name
+
         # Process CSV files
         if 'csv' in cfg.file_types:
-            csv_paths = sorted(p for p in cfg.dataset_dir.glob("*.csv") if p.is_file())
+            csv_paths = sorted(p for p in cfg.dataset_dir.glob("*.csv") if p.is_file() and not _skip_non_provisioning(p))
             if csv_paths:
                 print(f"📊 Found {len(csv_paths)} CSV files...")
                 primary = cfg.dataset_dir / cfg.primary_csv
@@ -445,7 +444,7 @@ def train(cfg: TrainConfig) -> None:
 
         # Process JSON files
         if 'json' in cfg.file_types:
-            json_paths = sorted(p for p in cfg.dataset_dir.glob("*.json") if p.is_file())
+            json_paths = sorted(p for p in cfg.dataset_dir.glob("*.json") if p.is_file() and not _skip_non_provisioning(p))
             if json_paths:
                 print(f"📋 Found {len(json_paths)} JSON files...")
                 for p in json_paths:
@@ -462,7 +461,7 @@ def train(cfg: TrainConfig) -> None:
 
         # Process TXT files
         if 'txt' in cfg.file_types:
-            txt_paths = sorted(p for p in cfg.dataset_dir.glob("*.txt") if p.is_file())
+            txt_paths = sorted(p for p in cfg.dataset_dir.glob("*.txt") if p.is_file() and not _skip_non_provisioning(p))
             if txt_paths:
                 print(f"📝 Found {len(txt_paths)} TXT files...")
                 for p in txt_paths:
@@ -479,7 +478,7 @@ def train(cfg: TrainConfig) -> None:
 
         # Process PDF files
         if 'pdf' in cfg.file_types:
-            pdf_paths = sorted(p for p in cfg.dataset_dir.glob("*.pdf") if p.is_file())
+            pdf_paths = sorted(p for p in cfg.dataset_dir.glob("*.pdf") if p.is_file() and not _skip_non_provisioning(p))
             if pdf_paths:
                 if HAVE_PDF:
                     print(f"📄 Found {len(pdf_paths)} PDF files...")
@@ -683,7 +682,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(Path("app") / "data" / "datasets" / "cloud_recommendations.csv"),
+        default=str(Path("app") / "data" / "datasets" / "cloud_deployments.csv"),
         help="Path to training file (CSV, JSON, TXT, or PDF)",
     )
     parser.add_argument(
@@ -700,7 +699,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--primary-csv",
         type=str,
-        default="cloud_recommendations.csv",
+        default="cloud_deployments.csv",
         help="CSV to prioritize first when training on --dataset-dir",
     )
     parser.add_argument(

@@ -1,46 +1,74 @@
+"""
+VaLLM ML Unit Tests - offline tests using mocks (no live server required).
+
+Tests cover (provisioning only):
+  - Health endpoint
+  - V1 query endpoint (provision intent)
+  - Terminal endpoint
+  - Developer endpoint (Terraform code gen)
+  - Cloud provision-intent endpoint (all 6 provisioning types)
+  - Payload generation (_raw_to_golang_payload)
+  - Non-provisioning classification (_classify_non_provisioning → "other")
+
+Run:
+    python -m pytest app/services/ai/ml/tests.py -v
+    python -m unittest app.services.ai.ml.tests -v
+"""
 
 import unittest
 import asyncio
 import sys
 import logging
 import os
-import requests
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock
 from pathlib import Path
 
 # Setup path
 current_dir = Path(__file__).parent
-project_root = current_dir.parent
+project_root = current_dir.parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
-sys.path.insert(0, str(current_dir))
 
-# Import app components (using try block to avoid ImportErrors during discovery)
+# Import app components
 try:
-    from app.app import health
-    from app.reasoning import ReasoningEngine
-    from app.embeddings import VectorStore
-    from app.routes import (
+    from app.services.ai.ml.routes import (
         QueryRequest,
         TerminalRequest,
         DeveloperRequest,
-        V3QueryRequest,
         query_endpoint,
         terminal_endpoint,
         developer_endpoint,
-        v3_query_endpoint,
+    )
+    from app.services.ai.ml.cloud_routes import (
+        _raw_to_golang_payload,
+        _classify_non_provisioning,
+        _is_deployment_result,
+        ProvisionIntentRequest,
+        provision_intent,
     )
 except ImportError as e:
     raise ImportError(
-        "Failed to import app modules for tests. Run from repo root with "
-        "`python -m app.tests` or ensure the app package is importable."
+        f"Failed to import app modules: {e}. "
+        "Run from repo root: python -m pytest app/services/ai/ml/tests.py -v"
     ) from e
 
-# Configure logging globally
+# Try importing the actual classes for mock specs
+try:
+    from app.services.ai.ml.reasoning import ReasoningEngine
+    from app.services.ai.ml.embeddings import VectorStore
+except ImportError:
+    ReasoningEngine = None
+    VectorStore = None
+
+try:
+    from app.app import health
+except ImportError:
+    health = None
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -54,6 +82,8 @@ def run_async(coro):
 
 
 class DummyRequest:
+    """Simulates a FastAPI Request with app.state."""
+
     def __init__(self, vector_store, reasoning_engine):
         self.app = SimpleNamespace(
             state=SimpleNamespace(
@@ -61,321 +91,452 @@ class DummyRequest:
                 reasoning_engine=reasoning_engine,
             )
         )
-        # Add state attribute for request_id (used by route handlers)
         self.state = SimpleNamespace(request_id="test-request-id")
 
 
-class TestCloudOperations(unittest.TestCase):
+# ==========================================================================
+# Test 1: Payload generation for all 6 provisioning intents
+# ==========================================================================
+class TestPayloadGeneration(unittest.TestCase):
+    """Test _raw_to_golang_payload for each provisioning intent."""
+
+    def test_provision_vm_payload(self):
+        """provision_vm should produce instance_type, region, os, volume_size, cloud_provider."""
+        raw = {
+            "username": "joel",
+            "workspace": "prod",
+            "instance_name": "web-01",
+            "instance_type": "t3.medium",
+            "region": "us-west-2",
+            "cloud_provider": "aws",
+            "os": "ubuntu",
+            "volume_size_gb": "50",
+            "volume_type": "gp3",
+            "environment": "production",
+            "hostname": "web-01.prod.internal",
+            "ssh_username": "ubuntu",
+            "key_pair_name": "prod-key",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_vm")
+        self.assertEqual(payload["instance_type"], "t3.medium")
+        self.assertEqual(payload["region"], "us-west-2")
+        self.assertEqual(payload["cloud_provider"], "aws")
+        self.assertEqual(payload["os"], "ubuntu")
+        self.assertEqual(payload["volume_size"], 50)
+        self.assertEqual(payload["volume_type"], "gp3")
+        self.assertEqual(payload["environment"], "production")
+        self.assertEqual(payload["username"], "joel")
+        self.assertEqual(payload["workspace"], "prod")
+        logger.info("PASS: provision_vm payload has all required fields")
+
+    def test_provision_kubernetes_payload(self):
+        """provision_kubernetes should produce cluster_name, node_count, node_type, kubernetes_version."""
+        raw = {
+            "username": "joel",
+            "workspace": "prod",
+            "cluster_name": "prod-eks",
+            "node_count": "3",
+            "node_type": "m5.large",
+            "kubernetes_version": "1.29",
+            "region": "us-east-1",
+            "cloud_provider": "aws",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_kubernetes")
+        self.assertEqual(payload["cluster_name"], "prod-eks")
+        self.assertEqual(payload["node_count"], 3)
+        self.assertEqual(payload["node_type"], "m5.large")
+        self.assertEqual(payload["kubernetes_version"], "1.29")
+        self.assertEqual(payload["region"], "us-east-1")
+        logger.info("PASS: provision_kubernetes payload correct")
+
+    def test_provision_docker_payload(self):
+        """provision_docker should produce docker_image, container_name, ports."""
+        raw = {
+            "username": "joel",
+            "workspace": "dev",
+            "docker_image": "nginx:latest",
+            "docker_service": "nginx",
+            "container_name": "web-nginx",
+            "ports": "80:80",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_docker")
+        self.assertEqual(payload["docker_image"], "nginx:latest")
+        self.assertEqual(payload["image"], "nginx:latest")
+        self.assertEqual(payload["container_name"], "web-nginx")
+        self.assertEqual(payload["ports"], "80:80")
+        logger.info("PASS: provision_docker payload correct")
+
+    def test_provision_database_payload(self):
+        """provision_database should produce database_engine, database_name, port."""
+        raw = {
+            "username": "joel",
+            "workspace": "prod",
+            "hostname": "db.internal",
+            "database_engine": "postgresql",
+            "database_name": "analytics_db",
+            "database_user": "admin",
+            "postgres_version": "16",
+            "port": "5432",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_database")
+        self.assertEqual(payload["database_engine"], "postgresql")
+        self.assertEqual(payload["database_name"], "analytics_db")
+        self.assertEqual(payload["database_user"], "admin")
+        self.assertEqual(payload["postgres_version"], "16")
+        self.assertEqual(payload["port"], 5432)
+        logger.info("PASS: provision_database payload correct")
+
+    def test_provision_fastapi_payload(self):
+        """provision_fastapi should produce app_name, app_port, http_port."""
+        raw = {
+            "username": "joel",
+            "workspace": "staging",
+            "hostname": "api.staging.com",
+            "app_name": "billing-api",
+            "app_port": "8000",
+            "http_port": "80",
+            "ssh_username": "ubuntu",
+            "key_pair_name": "staging-key",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_fastapi")
+        self.assertEqual(payload["app_name"], "billing-api")
+        self.assertEqual(payload["app_port"], 8000)
+        self.assertEqual(payload["http_port"], 80)
+        self.assertEqual(payload["hostname"], "api.staging.com")
+        logger.info("PASS: provision_fastapi payload correct")
+
+    def test_provision_static_website_payload(self):
+        """provision_static_website should produce server_name, http_port."""
+        raw = {
+            "username": "joel",
+            "workspace": "prod",
+            "hostname": "docs.example.com",
+            "server_name": "docs.example.com",
+            "http_port": "80",
+            "ssh_username": "ubuntu",
+            "key_pair_name": "web-key",
+        }
+        payload = _raw_to_golang_payload(raw, "provision_static_website")
+        self.assertEqual(payload["server_name"], "docs.example.com")
+        self.assertEqual(payload["http_port"], 80)
+        self.assertEqual(payload["hostname"], "docs.example.com")
+        logger.info("PASS: provision_static_website payload correct")
+
+
+# ==========================================================================
+# Test 2: Non-provisioning classification (provisioning-only API: always "other")
+# ==========================================================================
+class TestNonProvisioningClassification(unittest.TestCase):
+    """Test _classify_non_provisioning returns 'other' for all non-provisioning queries."""
+
+    def test_all_return_other(self):
+        self.assertEqual(_classify_non_provisioning("Our API is down with 503 error"), "other")
+        self.assertEqual(_classify_non_provisioning("AWS spend is too expensive"), "other")
+        self.assertEqual(_classify_non_provisioning("Show me the billing for last month"), "other")
+        self.assertEqual(_classify_non_provisioning("What time is it"), "other")
+        self.assertEqual(_classify_non_provisioning("Deploy EC2 instance"), "other")  # classification only when no match
+
+
+# ==========================================================================
+# Test 3: Deployment result detection
+# ==========================================================================
+class TestDeploymentResultDetection(unittest.TestCase):
+    """Test _is_deployment_result filter logic."""
+
+    def test_valid_deployment_result(self):
+        meta = {"raw": {"intent": "provision_vm", "prompt": "Deploy EC2"}}
+        self.assertTrue(_is_deployment_result(meta))
+
+    def test_missing_intent(self):
+        meta = {"raw": {"prompt": "Deploy EC2"}}
+        self.assertFalse(_is_deployment_result(meta))
+
+    def test_empty_intent(self):
+        meta = {"raw": {"intent": "", "prompt": "Deploy EC2"}}
+        self.assertFalse(_is_deployment_result(meta))
+
+    def test_no_raw(self):
+        meta = {"type": "incident"}
+        self.assertFalse(_is_deployment_result(meta))
+
+    def test_empty_meta(self):
+        self.assertFalse(_is_deployment_result({}))
+
+
+# ==========================================================================
+# Test 4: V1 Query endpoint with mocked reasoning engine
+# ==========================================================================
+class TestV1QueryEndpoint(unittest.TestCase):
+    """Test the V1 /query endpoint with mocked dependencies."""
 
     @classmethod
     def setUpClass(cls):
-        """Global Setup"""
-        # Create a mock vector store and reasoning engine
-        cls.mock_vector_store = MagicMock(spec=VectorStore)
-        cls.mock_reasoning_engine = MagicMock(spec=ReasoningEngine)
-        
-        # Configure the mock reasoning engine's reason method
-        cls.mock_reasoning_engine.reason = AsyncMock(return_value={
-            'intent': 'provision_vm',
-            'steps': [
-                {'type': 'analyze', 'content': 'Detected provision intent', 'confidence': 0.9, 'metadata': {}},
-                {'type': 'search', 'content': 'Found templates', 'confidence': 0.8, 'metadata': {}}
-            ],
-            'final_answer': "To provision the VM, use the t2.micro instance type with Ubuntu 22.04.",
-            'confidence': 0.95,
-            'context_used': "doc1 | doc2"
-        })
-        
-        # Configure query search results
+        cls.mock_vector_store = MagicMock()
+        cls.mock_reasoning_engine = MagicMock()
         cls.mock_vector_store.search = AsyncMock(return_value=[
-             {
-                'document': 'config: t2.micro, ami: ubuntu-22.04', 
-                'metadata': {'type': 'configuration', 'raw_data': {'title': 'Web Server'}}, 
-                'score': 0.88
+            {
+                "document": "Deploy t2.micro in us-east-1 with Ubuntu 22.04",
+                "metadata": {"type": "deployment", "raw": {"intent": "provision_vm"}},
+                "score": 0.88,
             },
             {
-                'document': 'incident: VM creation failed due to quota', 
-                'metadata': {'type': 'incident', 'raw_data': {'title': 'Quota Exceeded', 'severity': 'high'}}, 
-                'score': 0.75
-            }
+                "document": "Incident: VM quota exceeded in us-west-2",
+                "metadata": {"type": "incident", "raw": {"severity": "high"}},
+                "score": 0.72,
+            },
         ])
+        cls.request = DummyRequest(cls.mock_vector_store, cls.mock_reasoning_engine)
 
-        cls.request = DummyRequest(
-            vector_store=cls.mock_vector_store,
-            reasoning_engine=cls.mock_reasoning_engine,
-        )
-
-    def test_01_health_check(self):
-        """Test API availability"""
-        logger.info("\n🧪 [Test 01] Checking API Health Endpoint...")
-        result = run_async(health())
-        logger.info(f"   Response Body: {result}")
-        logger.info("   LLM Input: N/A (health check)")
-        logger.info(f"   LLM Output: {result}")
-        self.assertEqual(result, {"status": "healthy"})
-        logger.info("   ✅ Health check passed")
-
-    def test_02_query_provision_vm(self):
-        """Test querying for VM provisioning"""
-        logger.info("\n🧪 [Test 02] Testing Query Endpoint (Provisioning Intent)...")
+    def test_provision_query_returns_response_and_reasoning(self):
+        """V1 query with provision intent should return response, reasoning, and context."""
+        self.mock_reasoning_engine.reason = AsyncMock(return_value={
+            "intent": "provision",
+            "steps": [
+                {"type": "analyze", "content": "Detected provision intent", "confidence": 0.95, "metadata": {}},
+                {"type": "search", "content": "Found 2 deployment templates", "confidence": 0.88, "metadata": {}},
+            ],
+            "final_answer": "Deploy a t2.micro instance in us-east-1 with Ubuntu 22.04 and 30GB gp3 volume.",
+            "confidence": 0.92,
+            "context_used": "2 deployment templates",
+        })
         payload = QueryRequest(
-            query=(
-                "Design a high-availability production environment with SOC2 compliance, "
-                "Multi-AZ EKS, and WAF/Shield. What is the recommended baseline policy?"
-            ),
+            query="Deploy a small EC2 instance with 30GB disk in us-east-1",
             include_reasoning=True,
+            top_k=5,
         )
-        logger.info(f"   Payload: {payload.model_dump()}")
-        logger.info(f"   LLM Input: {payload.query}")
-        
-        # Override specific mock behavior for this test if needed
-        self.mock_reasoning_engine.reason.return_value = {
-             'intent': 'provision',
-             'steps': [{'type': 'plan', 'content': 'Planning VM', 'confidence': 1.0, 'metadata': {}}],
-             'final_answer': "You should use Terraform module x.",
-             'confidence': 0.9
-        }
-        
         data = run_async(query_endpoint(payload, self.request))
-        logger.info(f"   LLM Output: {data.get('response')}")
-        
         self.assertIn("response", data)
         self.assertIn("reasoning", data)
         self.assertIn("context", data)
-        self.assertEqual(data['reasoning']['intent'], 'provision')
-        self.assertEqual(len(data['context']), 2) # matches the mock setup
-        
-        logger.info(f"   Detected Intent: {data['reasoning']['intent']}")
-        logger.info(f"   Reasoning Steps: {len(data['reasoning']['steps'])}")
-        logger.info(f"   Context Documents: {len(data['context'])}")
-        logger.info("   ✅ Provisioning query test passed")
+        self.assertEqual(data["reasoning"]["intent"], "provision")
+        self.assertGreaterEqual(data["reasoning"]["confidence"], 0.5)
+        self.assertEqual(len(data["context"]), 2)
+        logger.info("PASS: V1 provision query returned correct structure")
 
-    def test_03_query_troubleshoot_incident(self):
-        """Test querying for incident troubleshooting"""
-        logger.info("\n🧪 [Test 03] Testing Query Endpoint (Troubleshooting + Filter)...")
-        payload = QueryRequest(
-            query=(
-                "We need a HIPAA workload with PHI data handling. Confirm the required "
-                "network placement, encryption, and access logging rules."
-            ),
-            filter_type="incident",
-        )
-        logger.info(f"   Payload: {payload.model_dump()}")
-        logger.info(f"   LLM Input: {payload.query}")
-        
-        self.mock_reasoning_engine.reason.return_value = {
-             'intent': 'troubleshoot',
-             'steps': [],
-             'final_answer': "Check security groups and network ACLs.",
-             'confidence': 0.85
-        }
-        
-        data = run_async(query_endpoint(payload, self.request))
-        logger.info(f"   LLM Output: {data.get('response')}")
-        
-        self.assertEqual(data['response'], "Check security groups and network ACLs.")
-        logger.info(f"   Response: {data['response']}")
-        
-        # Verify vector store was searched with filter
-        self.mock_vector_store.search.assert_awaited_with(
-            query=(
-                "We need a HIPAA workload with PHI data handling. Confirm the required "
-                "network placement, encryption, and access logging rules."
-            ),
-            top_k=5,
-            filter_type="incident"
-        )
-        logger.info("   ✅ Filter type applied correctly to vector search")
-        logger.info("   ✅ Troubleshooting test passed")
+# ==========================================================================
+# Test 5: Terminal endpoint
+# ==========================================================================
+class TestTerminalEndpoint(unittest.TestCase):
 
-    def test_04_terminal_command_analysis(self):
-        """Test terminal command explanation"""
-        logger.info("\n🧪 [Test 04] Testing Terminal Endpoint...")
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_vector_store = MagicMock()
+        cls.mock_reasoning_engine = MagicMock()
+        cls.mock_vector_store.search = AsyncMock(return_value=[
+            {
+                "document": "kubectl get pods returns pod status across namespaces",
+                "metadata": {"type": "incident", "raw_data": {"title": "K8s troubleshooting"}},
+                "score": 0.80,
+            },
+        ])
+        cls.mock_reasoning_engine.reason = AsyncMock(return_value={
+            "intent": "analyze",
+            "steps": [],
+            "final_answer": "This command lists all pods in all namespaces with their status.",
+            "confidence": 0.95,
+        })
+        cls.request = DummyRequest(cls.mock_vector_store, cls.mock_reasoning_engine)
+
+    def test_terminal_kubectl_command(self):
+        """Terminal endpoint should analyze kubectl commands and return incidents + recommendations."""
         payload = TerminalRequest(
-            command="aws s3api put-bucket-lifecycle-configuration --bucket data-pipeline --lifecycle-configuration file://lifecycle.json",
+            command="kubectl get pods --all-namespaces",
             include_explanation=True,
         )
-        logger.info(f"   Command: {payload.command}")
-        logger.info(f"   LLM Input: {payload.command}")
-        
-        self.mock_reasoning_engine.reason.return_value = {
-             'intent': 'analyze',
-             'steps': [],
-             'final_answer': "This command lists all pods in all namespaces.",
-             'confidence': 0.99
-        }
-        
         data = run_async(terminal_endpoint(payload, self.request))
-        logger.info(f"   LLM Output: {data.get('response')}")
-        
-        self.assertIn("This command lists all pods", data['response'])
+        self.assertIn("response", data)
         self.assertIn("incidents", data)
         self.assertIn("recommendations", data)
-        
-        logger.info(f"   Analysis: {data['response']}")
-        logger.info(f"   Incidents Found: {len(data['incidents'])}")
-        logger.info(f"   Recommendations: {len(data['recommendations'])}")
-        logger.info("   ✅ Terminal analysis test passed")
+        logger.info("PASS: Terminal endpoint returned analysis with incidents and recommendations")
 
-    def test_05_developer_code_gen(self):
-        """Test developer code assistance"""
-        logger.info("\n🧪 [Test 05] Testing Developer Endpoint (Code Gen)...")
+
+# ==========================================================================
+# Test 6: Developer endpoint (Terraform code gen)
+# ==========================================================================
+class TestDeveloperEndpoint(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mock_vector_store = MagicMock()
+        cls.mock_reasoning_engine = MagicMock()
+        cls.mock_vector_store.search = AsyncMock(return_value=[])
+        cls.mock_reasoning_engine.reason = AsyncMock(return_value={
+            "intent": "provision",
+            "steps": [],
+            "final_answer": "Here is the Terraform code for a production VPC.",
+            "confidence": 0.90,
+        })
+        cls.request = DummyRequest(cls.mock_vector_store, cls.mock_reasoning_engine)
+
+    def test_terraform_vpc_code_gen(self):
+        """Developer endpoint should return code_examples with Terraform for VPC."""
         payload = DeveloperRequest(
-            query=(
-                "Generate Terraform for a production VPC with Flow Logs enabled, "
-                "private DNS namespace, and KMS-backed encryption defaults."
-            ),
+            query="Generate Terraform for a production VPC with Flow Logs and KMS encryption",
             include_code=True,
         )
-        logger.info(f"   Query: {payload.query}")
-        logger.info(f"   LLM Input: {payload.query}")
-        
-        self.mock_reasoning_engine.reason.return_value = {
-             'intent': 'provision',
-             'steps': [],
-             'final_answer': "Here is the terraform code for S3.",
-             'confidence': 0.95
-        }
-        
         data = run_async(developer_endpoint(payload, self.request))
-        logger.info(f"   LLM Output: {data.get('response')}")
-        
         self.assertIn("code_examples", data)
-        self.assertEqual(data['model'], "vallm-developer-v1")
-        
-        logger.info("   ✅ Code examples returned")
-        logger.info(f"   Model used: {data['model']}")
-        logger.info("   ✅ Developer endpoint test passed")
+        self.assertEqual(data["model"], "vallm-developer-v1")
+        # The Terraform example should contain VPC-related resources
+        code = data.get("code_examples", "")
+        self.assertIn("aws_vpc", code)
+        self.assertIn("flow_log", code.lower().replace("_", " ").replace("-", " ") or code)
+        logger.info("PASS: Developer endpoint returned Terraform code with VPC resources")
 
-    def test_06_v3_unusual_incident_patterns(self):
-        """Test V3 incident pattern endpoint"""
-        logger.info("\n🧪 [Test 06] Testing V3 Incident Patterns Endpoint...")
-        payload = V3QueryRequest(
-            query=(
-                "Unusual incident patterns tied to VPN flaps, private subnet misconfigurations, "
-                "and multi-AZ failover issues in cloud environments."
-            ),
-            top_k=5,
-            include_reasoning=True,
-            focus="cloud_devops",
-        )
-        logger.info(f"   LLM Input: {payload.query}")
 
-        self.mock_vector_store.search.return_value = [
+# ==========================================================================
+# Test 7: Cloud provision-intent endpoint (mocked vector store)
+# ==========================================================================
+class TestCloudProvisionIntentEndpoint(unittest.TestCase):
+    """Test the /api/cloud/provision-intent endpoint with mocked search."""
+
+    def _make_request(self, vector_store):
+        req = MagicMock()
+        req.app = SimpleNamespace(state=SimpleNamespace(vector_store=vector_store))
+        return req
+
+    def test_provision_vm_intent_detected(self):
+        """When vector search returns a deployment match with provision_vm, endpoint should return it."""
+        mock_vs = MagicMock()
+        mock_vs.search = AsyncMock(return_value=[
             {
-                "document": "incident: VPN tunnel drops on AWS",
+                "document": "Deploy t3.medium EC2 in us-west-2",
                 "metadata": {
                     "raw": {
-                        "incident_id": "INC-100",
-                        "severity": "critical",
-                        "category": "networking",
-                        "service": "aws",
-                        "error_code": "VPN_DISCONNECT",
-                        "tags": "aws+vpn+network",
-                        "timestamp": "2026-01-17T08:15:00Z",
+                        "intent": "provision_vm",
+                        "prompt": "Deploy t3.medium EC2 in us-west-2",
+                        "username": "joel",
+                        "workspace": "prod",
+                        "instance_type": "t3.medium",
+                        "region": "us-west-2",
+                        "cloud_provider": "aws",
+                        "os": "ubuntu",
+                        "volume_size_gb": "50",
                     }
                 },
-                "score": 0.91,
+                "score": 0.85,
             },
+        ])
+        req = self._make_request(mock_vs)
+        body = ProvisionIntentRequest(query="Deploy a t3.medium EC2 in us-west-2")
+        data = run_async(provision_intent(body, req))
+        self.assertEqual(data["query_type"], "provisioning")
+        self.assertEqual(data["intent"], "provision_vm")
+        self.assertGreaterEqual(data["confidence"], 0.2)
+        self.assertIn("instance_type", data["payload"])
+        self.assertEqual(data["payload"]["instance_type"], "t3.medium")
+        logger.info("PASS: provision-intent detected provision_vm with correct payload")
+
+    def test_non_provisioning_returns_other(self):
+        """When no deployment matches found, return query_type other (provisioning-only)."""
+        mock_vs = MagicMock()
+        mock_vs.search = AsyncMock(return_value=[
             {
-                "document": "incident: CI pipeline timeout",
-                "metadata": {
-                    "raw": {
-                        "incident_id": "INC-101",
-                        "severity": "high",
-                        "category": "cicd",
-                        "service": "github-actions",
-                        "error_code": "RUNNER_TIMEOUT",
-                        "tags": "cicd+devops",
-                        "timestamp": "2026-01-17T11:00:00Z",
-                    }
-                },
-                "score": 0.83,
+                "document": "Database connection pool exhausted",
+                "metadata": {"type": "other"},
+                "score": 0.70,
             },
-        ]
+        ])
+        req = self._make_request(mock_vs)
+        body = ProvisionIntentRequest(query="Our database has error 503 and is down")
+        data = run_async(provision_intent(body, req))
+        self.assertEqual(data["query_type"], "other")
+        self.assertIsNone(data["intent"])
+        self.assertIsNone(data["payload"])
+        logger.info("PASS: provision-intent returned other when no deployment match")
 
-        self.mock_reasoning_engine.reason.return_value = {
-            "intent": "analyze_incidents",
-            "steps": [],
-            "final_answer": "Detected unusual high-severity networking and CI/CD incidents.",
-            "confidence": 0.92,
+    def test_low_confidence_falls_back(self):
+        """When deployment match has low confidence (<0.2), classify as non-provisioning."""
+        mock_vs = MagicMock()
+        mock_vs.search = AsyncMock(return_value=[
+            {
+                "document": "Some deployment",
+                "metadata": {"raw": {"intent": "provision_vm", "prompt": "deploy vm"}},
+                "score": 0.10,
+            },
+        ])
+        req = self._make_request(mock_vs)
+        body = ProvisionIntentRequest(query="What is the cost of running t3.medium?")
+        data = run_async(provision_intent(body, req))
+        self.assertNotEqual(data["query_type"], "provisioning")
+        self.assertIsNone(data["intent"])
+        logger.info("PASS: Low confidence correctly fell back to non-provisioning")
+
+    def test_empty_query(self):
+        """Empty query should return query_type=other."""
+        mock_vs = MagicMock()
+        req = self._make_request(mock_vs)
+        body = ProvisionIntentRequest(query="")
+        data = run_async(provision_intent(body, req))
+        self.assertEqual(data["query_type"], "other")
+        self.assertIsNone(data["intent"])
+        logger.info("PASS: Empty query returned query_type=other")
+
+
+# ==========================================================================
+# Test 8: Health endpoint
+# ==========================================================================
+class TestHealthEndpoint(unittest.TestCase):
+
+    @unittest.skipIf(health is None, "Could not import health endpoint")
+    def test_health_returns_healthy(self):
+        result = run_async(health())
+        self.assertEqual(result, {"status": "healthy"})
+        logger.info("PASS: Health endpoint returned healthy")
+
+
+# ==========================================================================
+# Test 9: Payload defaults and edge cases
+# ==========================================================================
+class TestPayloadDefaults(unittest.TestCase):
+    """Test that _raw_to_golang_payload handles missing/nan values with sensible defaults."""
+
+    def test_vm_defaults_for_missing_fields(self):
+        """Missing fields should get sensible defaults."""
+        raw = {"username": "joel", "workspace": "dev"}
+        payload = _raw_to_golang_payload(raw, "provision_vm")
+        self.assertEqual(payload["instance_type"], "t2.micro")
+        self.assertEqual(payload["region"], "us-east-1")
+        self.assertEqual(payload["cloud_provider"], "aws")
+        self.assertEqual(payload["os"], "ubuntu")
+        self.assertEqual(payload["volume_size"], 30)
+        self.assertEqual(payload["volume_type"], "gp3")
+        self.assertEqual(payload["environment"], "dev")
+        logger.info("PASS: VM payload defaults applied correctly")
+
+    def test_nan_values_treated_as_empty(self):
+        """NaN string values from CSV should be treated as empty."""
+        raw = {
+            "username": "joel",
+            "workspace": "prod",
+            "instance_type": "nan",
+            "region": "NaN",
+            "os": "NAN",
         }
+        payload = _raw_to_golang_payload(raw, "provision_vm")
+        self.assertEqual(payload["instance_type"], "t2.micro")  # default
+        self.assertEqual(payload["region"], "us-east-1")  # default
+        self.assertEqual(payload["os"], "ubuntu")  # default
+        logger.info("PASS: NaN values correctly treated as empty, defaults applied")
 
-        data = run_async(v3_query_endpoint(payload, self.request))
-        logger.info(f"   LLM Output: {data.get('response')}")
+    def test_kubernetes_defaults(self):
+        """Kubernetes defaults should be node_count=2, node_type=t3.medium."""
+        raw = {"username": "joel", "workspace": "dev"}
+        payload = _raw_to_golang_payload(raw, "provision_kubernetes")
+        self.assertEqual(payload["node_count"], 2)
+        self.assertEqual(payload["node_type"], "t3.medium")
+        self.assertEqual(payload["region"], "us-east-1")
+        self.assertEqual(payload["cloud_provider"], "aws")
+        logger.info("PASS: Kubernetes defaults applied correctly")
 
-        self.assertEqual(data["model"], "vallm-v3-enhanced")
-        self.assertIn("metrics", data)
-        self.assertIn("success_metrics", data)
-        self.assertIn("unusual_incidents", data)
-        self.assertGreaterEqual(data["metrics"]["unusual_count"], 1)
-        self.assertEqual(data["focus"], "cloud_devops")
-        self.assertIn("signals_used", data)
-        self.assertIn("sklearn", data["signals_used"])
-        self.assertIn("xgboost", data["signals_used"])
-        self.assertIn("pytorch", data["signals_used"])
+    def test_database_defaults(self):
+        """Database defaults should be engine=postgres, port=5432."""
+        raw = {"username": "joel", "workspace": "dev"}
+        payload = _raw_to_golang_payload(raw, "provision_database")
+        self.assertEqual(payload["database_engine"], "postgres")
+        self.assertEqual(payload["port"], 5432)
+        logger.info("PASS: Database defaults applied correctly")
 
 
-@unittest.skipUnless(
-    os.getenv("VALLM_LIVE_TESTS", "").lower() in {"1", "true", "yes"},
-    "Set VALLM_LIVE_TESTS=true to run live API smoke tests."
-)
-class LiveSmokeTests(unittest.TestCase):
-    BASE_URL = os.getenv("VALLM_BASE_URL", "http://127.0.0.1:8000")
-    TIMEOUT = 30
-
-    def _post(self, path: str, payload: dict) -> dict:
-        url = f"{self.BASE_URL}{path}"
-        response = requests.post(url, json=payload, timeout=self.TIMEOUT)
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            body = response.text.strip()
-            detail = f"{exc}"
-            if body:
-                detail = f"{detail}\nServer response:\n{body}"
-            raise requests.HTTPError(detail) from exc
-        return response.json()
-
-    def test_live_health(self):
-        response = requests.get(f"{self.BASE_URL}/health", timeout=5)
-        self.assertEqual(response.status_code, 200)
-
-    def test_live_v1_dr_site(self):
-        payload = {
-            "query": (
-                "Design a disaster recovery site with RPO < 15 minutes and RTO < 1 hour. "
-                "Include replication and failover controls."
-            ),
-            "top_k": 3,
-            "include_reasoning": True,
-        }
-        data = self._post("/api/model/v1/query", payload)
-        self.assertIn("response", data)
-
-    def test_live_v1_private_subnet(self):
-        payload = {
-            "query": (
-                "Deploy an internal payroll API with PII. Should it be in private subnet, "
-                "and what ingress controls are required?"
-            ),
-            "top_k": 3,
-            "include_reasoning": True,
-        }
-        data = self._post("/api/model/v1/query", payload)
-        self.assertIn("response", data)
-
-    def test_live_v1_openvpn(self):
-        payload = {
-            "query": (
-                "Provision OpenVPN in a private subnet with UDP/1194 exposure, MFA, "
-                "and restricted VPC peering to 10.50.0.0/16."
-            ),
-            "top_k": 3,
-            "include_reasoning": True,
-        }
-        data = self._post("/api/model/v1/query", payload)
-        self.assertIn("response", data)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

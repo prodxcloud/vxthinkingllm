@@ -23,13 +23,9 @@ class ReasoningEngine:
     
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
+        # Provisioning-only: single intent for deployment/provision flows
         self.intent_keywords = {
-            'provision': ['provision', 'create', 'deploy', 'setup', 'launch', 'spin up'],
-            'analyze': ['analyze', 'review', 'check', 'examine', 'inspect', 'audit'],
-            'optimize': ['optimize', 'improve', 'reduce', 'minimize', 'enhance'],
-            'troubleshoot': ['fix', 'resolve', 'debug', 'troubleshoot', 'error', 'issue'],
-            'monitor': ['monitor', 'status', 'health', 'metrics', 'performance'],
-            'cost': ['cost', 'billing', 'price', 'spend', 'budget', 'expensive']
+            'provision': ['provision', 'create', 'deploy', 'setup', 'launch', 'spin up', 'run', 'host', 'install'],
         }
     
     async def initialize(self):
@@ -175,13 +171,7 @@ class ReasoningEngine:
         if found_regions:
             analysis_parts.append(f"Identified regions: {', '.join(set(found_regions))}")
         
-        # Look for issues/problems
-        problem_keywords = ['error', 'failure', 'issue', 'problem', 'down', 'slow']
-        found_problems = [kw for kw in problem_keywords if kw in context.lower()]
-        if found_problems:
-            analysis_parts.append(f"Potential issues detected: {', '.join(set(found_problems))}")
-        
-        summary = " | ".join(analysis_parts) if analysis_parts else "General cloud operations query"
+        summary = " | ".join(analysis_parts) if analysis_parts else "Provisioning and deployment context"
         
         return {
             'summary': summary,
@@ -189,7 +179,6 @@ class ReasoningEngine:
             'metadata': {
                 'resources': found_resources,
                 'regions': found_regions,
-                'problems': found_problems
             }
         }
     
@@ -203,18 +192,12 @@ class ReasoningEngine:
         """Synthesize information into actionable insights"""
         synthesis_parts = []
         
-        # Based on intent, provide relevant synthesis
+        # Provisioning-only synthesis
         if intent == 'provision':
             synthesis_parts.append("Provisioning operation detected. Reviewing available resources and configurations.")
             synthesis_parts.append("Checking for similar deployments and best practices.")
-        elif intent == 'troubleshoot':
-            synthesis_parts.append("Troubleshooting operation detected. Analyzing incidents and error patterns.")
-            synthesis_parts.append("Reviewing similar issues and their resolutions.")
-        elif intent == 'optimize':
-            synthesis_parts.append("Optimization operation detected. Analyzing current configurations and metrics.")
-            synthesis_parts.append("Reviewing recommendations and cost-saving opportunities.")
         else:
-            synthesis_parts.append("General query. Analyzing context for relevant information.")
+            synthesis_parts.append("Deployment-related query. Analyzing context for provisioning patterns.")
         
         # Add analysis insights
         if analysis.get('metadata'):
@@ -239,30 +222,18 @@ class ReasoningEngine:
         """Make final decision or recommendation"""
         recommendation_parts = []
         
-        # Generate recommendation based on intent
+        # Provisioning-only recommendations
         if intent == 'provision':
             recommendation_parts.append("Based on the context, I recommend:")
             recommendation_parts.append("1. Review similar resource configurations")
             recommendation_parts.append("2. Check compliance and security requirements")
-            recommendation_parts.append("3. Consider cost optimization based on usage patterns")
-            recommendation_parts.append("4. Validate against existing infrastructure patterns")
-        elif intent == 'troubleshoot':
-            recommendation_parts.append("Troubleshooting recommendations:")
-            recommendation_parts.append("1. Review similar incidents and their resolutions")
-            recommendation_parts.append("2. Check system metrics and logs")
-            recommendation_parts.append("3. Verify configuration compliance")
-            recommendation_parts.append("4. Consider rolling back recent changes")
-        elif intent == 'optimize':
-            recommendation_parts.append("Optimization recommendations:")
-            recommendation_parts.append("1. Review cost analysis and resource utilization")
-            recommendation_parts.append("2. Consider right-sizing instances")
-            recommendation_parts.append("3. Implement auto-scaling where appropriate")
-            recommendation_parts.append("4. Review and apply best practice recommendations")
+            recommendation_parts.append("3. Validate against existing infrastructure patterns")
+            recommendation_parts.append("4. Apply deployment best practices from the knowledge base")
         else:
             recommendation_parts.append("Based on the available context:")
-            recommendation_parts.append("1. Review relevant configurations and resources")
-            recommendation_parts.append("2. Check for similar patterns in the infrastructure")
-            recommendation_parts.append("3. Consider best practices and recommendations")
+            recommendation_parts.append("1. Review relevant deployment configurations and resources")
+            recommendation_parts.append("2. Check for similar provisioning patterns in the infrastructure")
+            recommendation_parts.append("3. Consider best practices for cloud provisioning")
         
         recommendation = "\n".join(recommendation_parts)
         

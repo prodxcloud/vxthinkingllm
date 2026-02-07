@@ -1,9 +1,9 @@
 """
-Embeddings and Vector Store Management (Refactored for Nemotron-8B)
+Embeddings and Vector Store Management
 Uses sentence-transformers, FAISS (Inner Product), and PostgreSQL with pgvector
 
 This module provides runtime embedding generation and vector search.
-Optimized for 4096-dim models using Cosine Similarity.
+Uses cosine similarity via normalized Inner Product.
 """
 
 import os
@@ -43,17 +43,18 @@ embedding_cache_hits = embedding_cache_misses = None
 search_cache_hits = search_cache_misses = None
 
 # ============================================================================
-# HARDCODED EMBEDDING MODEL CONFIGURATION
+# EMBEDDING MODEL - Must match precompute.py
+# Use a sentence-transformers model (e.g. all-MiniLM-L6-v2). Do NOT use
+# causal LLMs like Qwen/Qwen2.5-3B; they are not built for similarity embeddings.
 # ============================================================================
-# SOTA Choice for 2026: 4096 dim, high-precision technical retrieval
-# EMBEDDING_MODEL_NAME = "nvidia/llama-embed-nemotron-8b"
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_DIM = 4096 
+# EMBEDDING_MODEL_NAME  = "roneneldan/TinyStories-1M"          # ~4MB, 1M params
+EMBEDDING_DIM = None  # Auto-detected at runtime from model (384 for all-MiniLM-L6-v2)
 # ============================================================================
 
 class VectorStore:
     """Manages embeddings, FAISS IndexFlatIP, and vector database persistence"""
-    
+
     def __init__(self, data_dir: str = None, model_name: str = EMBEDDING_MODEL_NAME):
         self.data_dir = Path(data_dir) if data_dir else Path(__file__).parent / "data"
         self.model_name = model_name
@@ -62,47 +63,69 @@ class VectorStore:
         self.documents = []
         self.metadata = []
         self.content_ids = []
-        
+
         # Paths
         self.data_storage_dir = self.data_dir / "vectorstore"
         self.data_storage_dir.mkdir(exist_ok=True, parents=True)
         self.index_path = self.data_storage_dir / "faiss_index.bin"
         self.documents_path = self.data_storage_dir / "documents.pkl"
-        
-        self.embedding_dim = EMBEDDING_DIM 
+
+        self.embedding_dim = None  # Set after model loads
         self.executor = ThreadPoolExecutor(max_workers=4)
-        
-        # Auto-detect CUDA for the 8B model
+
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         try:
-            print(f"🔧 VectorStore initializing on: {self.device}")
+            print(f"VectorStore initializing on: {self.device}")
         except UnicodeEncodeError:
             print(f"VectorStore initializing on: {self.device}")
 
     async def initialize(self):
         """Initialize the vector store - load model and handle IndexFlatIP"""
         loop = asyncio.get_event_loop()
-        
-        # Load the 8B Model
-        self.model = await loop.run_in_executor(
-            self.executor,
-            lambda: SentenceTransformer(self.model_name, device=self.device)
-        )
-        
-        # Verify Dimension
+
+        # Load model
+        def _load_model():
+            m = SentenceTransformer(self.model_name, device=self.device, trust_remote_code=True)
+            if getattr(m.tokenizer, "pad_token", None) is None:
+                m.tokenizer.pad_token = m.tokenizer.eos_token
+            return m
+        self.model = await loop.run_in_executor(self.executor, _load_model)
+
+        # Detect embedding dimension from model
         test_embedding = await loop.run_in_executor(
             self.executor,
             lambda: self.model.encode(["test"], convert_to_numpy=True)
         )
         self.embedding_dim = test_embedding.shape[1]
-        
-        # Load or Build Index
+        print(f"Embedding model: {self.model_name} ({self.embedding_dim} dims)")
+
+        # Load or build index
         if self.index_path.exists() and self.documents_path.exists():
             await self._load_index()
+            # Validate: index dimension must match model dimension
+            if self.faiss_index and self.faiss_index.d != self.embedding_dim:
+                print(
+                    f"WARNING: Index dimension ({self.faiss_index.d}) != "
+                    f"model dimension ({self.embedding_dim}). "
+                    f"Rebuilding empty index. Run precompute.py to re-index."
+                )
+                self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)
+                self.documents = []
+                self.metadata = []
+                self.content_ids = []
+            # Validate: documents count must match index vectors
+            elif self.faiss_index and self.faiss_index.ntotal != len(self.documents):
+                print(
+                    f"WARNING: Index has {self.faiss_index.ntotal} vectors but "
+                    f"{len(self.documents)} documents. Run precompute.py to rebuild."
+                )
+                self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)
+                self.documents = []
+                self.metadata = []
+                self.content_ids = []
         else:
-            # Using IndexFlatIP + normalization = Cosine Similarity
             self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)
-            
+
         return True
 
     async def _load_index(self):
@@ -120,9 +143,9 @@ class VectorStore:
                 self.content_ids = data.get('content_ids', [])
 
     async def store_embeddings(self, texts: List[str], content_type: str, content_ids: List[str], metadata_list: List[Dict]):
-        """Generates, normalizes, and stores embeddings for a batch of texts."""
+        """Generates, L2-normalizes, and stores embeddings for a batch of texts."""
         if not self.model or self.faiss_index is None:
-             await self.initialize()
+            await self.initialize()
 
         if not texts:
             return 0

@@ -1,9 +1,8 @@
 """
 Cloud provisioning intent API for VaLLM.
 
-Returns structured intent + Golang-ready payload for provisioning requests,
-and query_type for non-provisioning (incidents, cost, billing, security, recommendations).
-Used by InfinityAI cloud agent: agent calls this, validates/double-checks, then triggers Golang API.
+Returns structured intent + Golang-ready payload for provisioning requests only.
+Non-provisioning queries return query_type "other". Used by InfinityAI cloud agent.
 """
 
 import logging
@@ -116,18 +115,7 @@ def _raw_to_golang_payload(raw: Dict[str, Any], intent: str) -> Dict[str, Any]:
 
 
 def _classify_non_provisioning(query: str) -> str:
-    """Classify query type when no provisioning match: incident, cost, billing, security, recommendation, other."""
-    q = query.lower()
-    if any(x in q for x in ("incident", "outage", "down", "error", "failure", "alert")):
-        return "incident"
-    if any(x in q for x in ("cost", "spend", "expensive", "budget")):
-        return "cost"
-    if any(x in q for x in ("bill", "invoice", "billing")):
-        return "billing"
-    if any(x in q for x in ("security", "vulnerability", "compliance", "encrypt")):
-        return "security"
-    if any(x in q for x in ("recommend", "suggestion", "optimize", "best practice")):
-        return "recommendation"
+    """When no provisioning match, return 'other' only (provisioning-focused API)."""
     return "other"
 
 
@@ -137,11 +125,8 @@ async def provision_intent(
     req: Request,
 ):
     """
-    Resolve user message to provisioning intent + Golang-ready payload, or query_type for non-provisioning.
-
-    VaLLM is designed for this: intent + how Golang wants the information.
-    Agent receives this, scores/double-checks, then triggers Golang API.
-    For incidents, cost, billing, security, recommendations: returns query_type only; agent uses LLM to answer.
+    Resolve user message to provisioning intent + Golang-ready payload.
+    When no deployment match: returns query_type "other". Provisioning-only.
     """
     vector_store = getattr(req.app.state, "vector_store", None)
     if not vector_store:
