@@ -42,7 +42,7 @@ SUPPORTED FILE FORMATS:
 
 OUTPUT:
 =======
-    app/data/model/
+    app/data/models/
         config.json
         tokenizer.json
         pytorch_model.bin
@@ -352,7 +352,7 @@ CSVCausalLMDataset = MultiFormatCausalLMDataset
 def keep_only_required_model_files(model_dir: Path) -> None:
     """Ensure the output folder contains exactly:
 
-    /model
+    /models
       config.json
       tokenizer.json
       pytorch_model.bin
@@ -717,8 +717,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=str(Path("app") / "data" / "model"),
-        help="Output folder (must be named model per requirement)",
+        default=str(Path("app") / "data" / "models"),
+        help="Output folder for trained model weights",
     )
     parser.add_argument("--text-max-length", type=int, default=512)
     parser.add_argument("--per-device-train-batch-size", type=int, default=4)

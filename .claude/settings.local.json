@@ -9,7 +9,8 @@
       "Bash(powershell -Command \"$env:PYTHONIOENCODING=''utf-8''; python ./app/precompute.py\")",
       "Bash(timeout /t 10 /nobreak)",
       "Bash(grep:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(dir:*)"
     ]
   }
 }

@@ -5,13 +5,13 @@ Tests cover all 6 provisioning intents and one V1 RAG provision query.
 No incident, cost, or troubleshooting tests.
 
 Start the app first:
-    uvicorn app.app:app --host 0.0.0.0 --port 8002
+    uvicorn app.app:app --host 0.0.0.0 --port 8745
 
 Run tests:
     python -m app.tests.tests               # batch mode (7 tests)
     python -m app.tests.tests --interactive  # interactive chat
     python -m app.tests.tests --interactive "deploy ec2 instance 20gb"
-    python -m app.tests.tests --url http://localhost:8000  # custom URL
+    python -m app.tests.tests --url http://localhost:8745  # custom URL
 """
 import sys
 import json
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import requests
 
-BASE_URL = "http://localhost:8002"
+BASE_URL = "http://localhost:8745"
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ TESTS: List[Dict[str, Any]] = [
     {
         "id": 7,
         "name": "V1 RAG query with reasoning (provision intent)",
-        "endpoint": "/api/model/v1/query",
+        "endpoint": "/api/models/v1/query",
         "payload": {
             "query": "Deploy a small EC2 instance with 30GB disk in us-east-1 with Ubuntu",
             "include_reasoning": True,
@@ -229,7 +229,7 @@ def run_tests(base_url: str = BASE_URL) -> None:
     if not client.health_check():
         print("FAILED")
         print("\nService not available. Start the app first:")
-        print("  uvicorn app.app:app --host 0.0.0.0 --port 8002")
+        print("  uvicorn app.app:app --host 0.0.0.0 --port 8745")
         return
     print("OK\n")
 
@@ -427,7 +427,7 @@ def _process_chat_query(client: VaLLMClient, user_input: str) -> None:
     # Explicit /rag prefix forces RAG
     elif user_input.startswith("/rag "):
         query = user_input[5:].strip()
-        endpoint = "/api/model/v1/query"
+        endpoint = "/api/models/v1/query"
         payload = {"query": query, "include_reasoning": True, "top_k": 5}
         mode = "rag"
     # Auto-detect
@@ -436,7 +436,7 @@ def _process_chat_query(client: VaLLMClient, user_input: str) -> None:
         payload = {"query": user_input}
         mode = "provision-intent"
     else:
-        endpoint = "/api/model/v1/query"
+        endpoint = "/api/models/v1/query"
         payload = {"query": user_input, "include_reasoning": True, "top_k": 5}
         mode = "rag"
 
@@ -477,7 +477,7 @@ def interactive_mode(base_url: str = BASE_URL, initial_query: str = "") -> None:
     print()
     print("  Tips:")
     print("    - Provisioning queries are auto-detected and sent to /api/cloud/provision-intent")
-    print("    - General/troubleshooting queries are sent to /api/model/v1/query (RAG + reasoning)")
+    print("    - General/troubleshooting queries are sent to /api/models/v1/query (RAG + reasoning)")
     print("    - Prefix with /cloud to force provision-intent")
     print("    - Prefix with /rag   to force RAG query")
     print()
@@ -493,7 +493,7 @@ def interactive_mode(base_url: str = BASE_URL, initial_query: str = "") -> None:
     if not client.health_check():
         print("FAILED")
         print("\n  Service not available. Start the app first:")
-        print("    uvicorn app.app:app --host 0.0.0.0 --port 8002")
+        print("    uvicorn app.app:app --host 0.0.0.0 --port 8745")
         return
     print("OK")
 
@@ -559,7 +559,7 @@ if __name__ == "__main__":
             "  python -m app.tests.tests                                    # run 7 tests\n"
             "  python -m app.tests.tests --interactive                      # chat mode\n"
             '  python -m app.tests.tests --interactive "deploy ec2 20gb"    # chat with initial query\n'
-            "  python -m app.tests.tests --url http://localhost:8000        # custom URL\n"
+            "  python -m app.tests.tests --url http://localhost:8745        # custom URL\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

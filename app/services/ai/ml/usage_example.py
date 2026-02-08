@@ -7,11 +7,11 @@ V1 RAG + reasoning, and RLHF feedback submission.
 USAGE:
 ======
     # 1. Start the API server first (in another terminal):
-    uvicorn app.app:app --host 0.0.0.0 --port 8002
+    uvicorn app.app:app --host 0.0.0.0 --port 8745
 
     # 2. Run this example:
     python -m app.services.ai.ml.usage_example
-    python -m app.services.ai.ml.usage_example --url http://localhost:8000
+    python -m app.services.ai.ml.usage_example --url http://localhost:8745
     python -m app.services.ai.ml.usage_example --section provision   # provisioning only
     python -m app.services.ai.ml.usage_example --section rag         # RAG queries only
     python -m app.services.ai.ml.usage_example --section feedback    # RLHF feedback only
@@ -28,7 +28,7 @@ import requests
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-BASE_URL = "http://localhost:8002"
+BASE_URL = "http://localhost:8745"
 TIMEOUT = 60
 TOP_K = 5
 SHOW_CONTEXT = True
@@ -335,7 +335,7 @@ def run_rag_examples(client: VaLLMClient) -> int:
     """Run V1 RAG + reasoning examples. Returns number of errors."""
     print("\n" + "=" * 70)
     print("  SECTION 3: V1 RAG Query with Reasoning Engine")
-    print("  Endpoint: POST /api/model/v1/query")
+    print("  Endpoint: POST /api/models/v1/query")
     print("=" * 70)
 
     errors = 0
@@ -350,7 +350,7 @@ def run_rag_examples(client: VaLLMClient) -> int:
             "include_reasoning": True,
             "top_k": TOP_K,
         }
-        data = client.post("/api/model/v1/query", payload)
+        data = client.post("/api/models/v1/query", payload)
         _print_rag_result(data, example)
         if "_error" in data:
             errors += 1
@@ -439,7 +439,7 @@ def main(base_url: str = BASE_URL, section: Optional[str] = None) -> None:
     if not client.health_check():
         print("FAILED")
         print("\nService not available. Start the app first:")
-        print("  uvicorn app.app:app --host 0.0.0.0 --port 8002")
+        print("  uvicorn app.app:app --host 0.0.0.0 --port 8745")
         return
     print("OK")
 
@@ -476,7 +476,7 @@ def main(base_url: str = BASE_URL, section: Optional[str] = None) -> None:
     if section in (None, "all", "provision"):
         print(f"    POST /api/cloud/provision-intent  ({len(PROVISION_EXAMPLES)} provisioning + {len(NON_PROVISION_EXAMPLES)} non-provisioning)")
     if section in (None, "all", "rag"):
-        print(f"    POST /api/model/v1/query          ({len(RAG_EXAMPLES)} RAG queries)")
+        print(f"    POST /api/models/v1/query          ({len(RAG_EXAMPLES)} RAG queries)")
     if section in (None, "all", "feedback"):
         print(f"    POST /platform/evals/feedback      (1 RLHF feedback)")
 

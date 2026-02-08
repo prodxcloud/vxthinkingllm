@@ -58,18 +58,18 @@ API ENDPOINTS:
         POST /generate            - LLM text generation
     
     V1 (RAG + Reasoning):
-        POST /api/model/v1/query     - RAG query with reasoning
-        POST /api/model/v1/developer - Developer assistance
-        POST /api/model/v1/terminal  - Terminal/CLI assistance
-    
+        POST /api/models/v1/query     - RAG query with reasoning
+        POST /api/models/v1/developer - Developer assistance
+        POST /api/models/v1/terminal  - Terminal/CLI assistance
+
     V2 (NLP + Document Analysis):
-        POST /api/model/v2/query     - NLP-enhanced query
-        POST /api/model/v2/extract   - Entity extraction
-        POST /api/model/v2/upload    - Document/image upload
-        GET  /api/model/v2/status    - NLP capabilities status
-    
+        POST /api/models/v2/query     - NLP-enhanced query
+        POST /api/models/v2/extract   - Entity extraction
+        POST /api/models/v2/upload    - Document/image upload
+        GET  /api/models/v2/status    - NLP capabilities status
+
     V3 (Cloud/DevOps Incident Patterns):
-        POST /api/model/v3/query     - Unusual incident patterns + metrics
+        POST /api/models/v3/query     - Unusual incident patterns + metrics
 
     Cloud provisioning (intent + Golang payload for agent):
         POST /api/cloud/provision-intent - Intent + payload for provisioning; query_type for incidents/cost/billing/security/recommendations
@@ -77,8 +77,8 @@ API ENDPOINTS:
 DEPLOYMENT:
 ===========
     Single Node:  python -m app.app
-    Production:   uvicorn app.app:app --host 0.0.0.0 --port 8000 --workers 4
-    Docker:       docker run -p 8000:8000 vallm:latest
+    Production:   uvicorn app.app:app --host 0.0.0.0 --port 8745 --workers 4
+    Docker:       docker run -p 8745:8745 vallm:latest
     Kubernetes:   See README.md for deployment manifests
 """
 
@@ -596,9 +596,9 @@ def display_system_info(
         print("    │  🔄 Auto-Precompute   : " + _pad("ON" if AUTO_PRECOMPUTE else "OFF") + " │")
         print("    │  🔄 Auto-Train        : " + _pad("ON" if AUTO_TRAIN else "OFF") + " │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print("    │  GET  /health          POST /api/model/v1/query (RAG)   │")
-        print("    │  GET  /logs            POST /api/model/v2/query (NLP)   │")
-        print("    │  POST /api/model/v3/query (Incident patterns)            │")
+        print("    │  GET  /health          POST /api/models/v1/query (RAG)  │")
+        print("    │  GET  /logs            POST /api/models/v2/query (NLP)  │")
+        print("    │  POST /api/models/v3/query (Incident patterns)           │")
         print("    └─────────────────────────────────────────────────────────┘")
         print("\033[0m")
 
@@ -646,7 +646,7 @@ async def lifespan(app: FastAPI):
         vectorstore_dir = data_dir / "vectorstore"
         faiss_index_path = vectorstore_dir / "faiss_index.bin"
         documents_file = vectorstore_dir / "documents.pkl"
-        model_dir = data_dir / "model"
+        model_dir = data_dir / "models"
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if not data_dir.exists():
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -745,32 +745,6 @@ async def lifespan(app: FastAPI):
         traceback.print_exc()
         raise
     
-    # Step 7: Platform Infrastructure
-    display_loading_bar("Initializing platform infrastructure", 6, 7)
-    try:
-        # Initialize database
-        try:
-            from .services.platform.database import init_db
-        except ImportError:
-            from services.platform.database import init_db
-        try:
-            init_db()
-            matrix_print("    ✓ Database initialized", "success")
-        except Exception as e:
-            matrix_print(f"    ⚠️  Database init warning: {e}", "warning")
-            logger.warning(f"Database initialization warning: {e}")
-
-        # Start lifecycle tasks
-        try:
-            from .services.platform.lifecycle_hooks import start_lifecycle_tasks
-        except ImportError:
-            from services.platform.lifecycle_hooks import start_lifecycle_tasks
-        await start_lifecycle_tasks(app.state)
-        matrix_print("    ✓ Lifecycle tasks started", "success")
-    except Exception as e:
-        matrix_print(f"    ⚠️  Platform infrastructure warning: {e}", "warning")
-        logger.warning(f"Platform infrastructure warning: {e}")
-    
     yield
     
     # Cleanup
@@ -779,16 +753,6 @@ async def lifespan(app: FastAPI):
         await vector_store.cleanup()
     if reasoning_engine:
         await reasoning_engine.cleanup()
-    
-    # Stop lifecycle tasks
-    try:
-        try:
-            from .services.platform.lifecycle_hooks import stop_lifecycle_tasks
-        except ImportError:
-            from services.platform.lifecycle_hooks import stop_lifecycle_tasks
-        await stop_lifecycle_tasks()
-    except Exception as e:
-        logger.warning(f"Error stopping lifecycle tasks: {e}")
     
     matrix_print("    ✓ Shutdown complete\n", "success")
 
@@ -816,18 +780,6 @@ try:
 except ImportError:
     pass
 
-# Tenant-aware rate limiting middleware (Redis-based, TPM)
-try:
-    try:
-        from .services.platform.tenant_rate_limit import TenantRateLimitMiddleware, RATE_LIMIT_ENABLED
-    except ImportError:
-        from services.platform.tenant_rate_limit import TenantRateLimitMiddleware, RATE_LIMIT_ENABLED
-    if RATE_LIMIT_ENABLED:
-        app.add_middleware(TenantRateLimitMiddleware)
-        logger.info("✅ Tenant-aware rate limiting enabled (Redis TPM)")
-except ImportError:
-    pass
-
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -851,31 +803,25 @@ except ImportError:
 logger.info(f"📁 Logs will be saved to: {LOG_FILE}")
 
 # Include routes
-app.include_router(router, prefix="/api/model/v1")
-app.include_router(router_v2, prefix="/api/model/v2")
-app.include_router(router_v3, prefix="/api/model/v3")
+app.include_router(router, prefix="/api/models/v1")
+app.include_router(router_v2, prefix="/api/models/v2")
+app.include_router(router_v3, prefix="/api/models/v3")
 app.include_router(cloud_router)  # POST /api/cloud/provision-intent (intent + Golang payload)
 
-# Include platform routes
+# Include monitoring routes
 try:
     try:
-        from .services.platform.model_router import router as platform_model_router
-        from .services.platform.eval_router import router as platform_eval_router
-        from .services.platform.health_probe_router import router as platform_health_router
+        from .services.monitoring.monitoring_services_router import router as monitoring_router
     except ImportError as e:
         if "attempted relative import with no known parent package" in str(e):
-            from services.platform.model_router import router as platform_model_router
-            from services.platform.eval_router import router as platform_eval_router
-            from services.platform.health_probe_router import router as platform_health_router
+            from services.monitoring.monitoring_services_router import router as monitoring_router
         else:
             raise
 
-    app.include_router(platform_model_router)
-    app.include_router(platform_eval_router)
-    app.include_router(platform_health_router)
-    logger.info("✅ Platform routes registered")
+    app.include_router(monitoring_router)
+    logger.info("✅ Monitoring routes registered")
 except ImportError as e:
-    logger.warning(f"Platform routes not available: {e}")
+    logger.warning(f"Monitoring routes not available: {e}")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1175,7 +1121,7 @@ if __name__ == "__main__":
     uvicorn.run(
         app,  # Pass the app object directly to avoid double import issues
         host="0.0.0.0",
-        port=8002,
+        port=8745,
         reload=False
     )
 
