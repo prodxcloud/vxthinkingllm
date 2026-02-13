@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from .entity_extraction import extract_entities_from_query
+
 router = APIRouter(prefix="/api/cloud", tags=["cloud"])
 logger = logging.getLogger("vallm.cloud")
 
@@ -189,6 +191,13 @@ async def provision_intent(
         }
 
     payload = _raw_to_golang_payload(raw, intent)
+    
+    # Extract entities from user query and override matched values
+    extracted_entities = extract_entities_from_query(query)
+    if extracted_entities:
+        logger.info(f"Overriding matched payload with extracted entities: {extracted_entities}")
+        payload.update(extracted_entities)
+    
     return {
         "query_type": "provisioning",
         "intent": intent,

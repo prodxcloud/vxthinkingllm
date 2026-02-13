@@ -6,7 +6,7 @@ This guide covers deployment options for VaLLM (Vector-based Local LLM) on Virtu
 
 - [Prerequisites](#prerequisites)
 - [Architecture Overview](#architecture-overview)
-- [Deployment Options](#deployment-options)
+- [Deployment Options](#deploymentsdfsdf-options)
   - [Option 1: Virtual Machine Deployment](#option-1-virtual-machine-deployment)
   - [Option 2: Azure Kubernetes Service (AKS) Deployment](#option-2-azure-kubernetes-service-aks-deployment)
 - [CI/CD Pipelines](#cicd-pipelines)

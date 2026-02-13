@@ -184,6 +184,12 @@ FASTAPI_PROMPTS = [
     "Please deploy FastAPI app {app_name} on {hostname}, port {app_port}",
     "Provision FastAPI service {app_name} on {hostname} with port {app_port}",
     "Launch FastAPI app on {hostname}, app port {app_port}, http port {http_port}",
+    "Deploy my API service {app_name} to {hostname}",
+    "Host FastAPI backend on {hostname}",
+    "Deploy Python FastAPI app {app_name}",
+    "Set up FastAPI microservice on {hostname}",
+    "Deploy REST API {app_name} to {hostname}",
+    "Launch Python API server on {hostname}",
 ]
 
 # ============================================================================
@@ -198,6 +204,16 @@ STATIC_PROMPTS = [
     "Please deploy static site to {hostname} on port {http_port}",
     "Host a static website on {hostname} via nginx",
     "Provision static site on {hostname}, http port {http_port}",
+    "Set up documentation site on {hostname}",
+    "Deploy my blog to {hostname}",
+    "Host my portfolio website on {hostname}",
+    "Deploy company website to {hostname}",
+    "I want to host a static site on {hostname}",
+    "Create static website deployment for {hostname}",
+    "Deploy HTML/CSS site to {hostname}",
+    "Host documentation on {hostname}",
+    "Deploy React build to {hostname}",
+    "Serve static files from {hostname}",
 ]
 
 # ============================================================================
@@ -584,7 +600,28 @@ def _empty_row() -> dict:
 
 
 def _host(prefix: str, n: int = 999) -> str:
-    return f"{prefix}-{random.randint(1, n)}.example.com"
+    """Generate realistic hostnames for training data."""
+    # Mix of realistic domain patterns users might actually request
+    realistic_domains = [
+        "docs.example.com",
+        "api.mycompany.com", 
+        "app.staging.com",
+        "blog.example.org",
+        "admin.backend.io",
+        "web.production.net",
+        "dashboard.internal",
+        "frontend.dev.com",
+        "backend.prod.io",
+        "www.mysite.com",
+        "portal.company.org",
+        "cms.website.net"
+    ]
+    
+    # 30% chance of realistic domain, 70% chance of random (for training diversity)
+    if random.random() < 0.3:
+        return random.choice(realistic_domains)
+    else:
+        return f"{prefix}-{random.randint(1, n)}.example.com"
 
 
 def _maybe_user() -> str:
