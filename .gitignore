@@ -48,3 +48,4 @@ Thumbs.db
 *.pkl.tar.tar
 ./app/data/
 app/data
+/app/logs/
