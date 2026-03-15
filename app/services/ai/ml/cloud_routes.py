@@ -49,8 +49,8 @@ def _raw_to_golang_payload(raw: Dict[str, Any], intent: str) -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "username": v("username"),
-        "workspace": v("workspace"),
-        "workspace_id": v("workspace"),
+        "tenant": v("tenant"),
+        "tenant_id": v("tenant"),
         "user_id": v("username"),
     }
 

@@ -13,7 +13,7 @@ from app.schemas.common import BaseSchema
 
 
 # ---------------------------------------------------------------------------
-# API Key Schemas (read-only view of InfinityAI's users_apikey)
+# API Key Schemas
 # ---------------------------------------------------------------------------
 
 class ApiKeyInfo(BaseSchema):
@@ -31,21 +31,16 @@ class ApiKeyInfo(BaseSchema):
 
 
 # ---------------------------------------------------------------------------
-# Caller Identity (resolved from API key)
+# Caller Identity (resolved from Developer key)
 # ---------------------------------------------------------------------------
 
 class CallerIdentity(BaseSchema):
-    """Identity of the authenticated caller, resolved from the API key."""
-    user_id: int
-    username: str
+    """Identity of the authenticated caller, resolved from the developer key."""
+    developer_id: Optional[str] = None
+    developer_name: str
     email: Optional[str] = None
-    full_name: Optional[str] = None
-    company_name: Optional[str] = None
-    organization_id: Optional[str] = None
-    organization_name: Optional[str] = None
-    is_superuser: bool = False
-    is_staff: bool = False
-    is_verified: bool = False
+    tenant_id: Optional[str] = None
+    tenant_name: Optional[str] = None
     api_key_name: str
     api_key_environment: str
     scopes: Optional[Dict[str, Any]] = None
