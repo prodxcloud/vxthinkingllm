@@ -31,6 +31,8 @@ python-dotenv>=1.0.0
 spacy>=3.7.0
 # PDF extraction
 PyPDF2>=3.0.0
+# Excel file support (.xlsx, .xls)
+openpyxl>=3.1.0
 # Image processing for architecture diagrams
 Pillow>=10.0.0
 # OCR for text extraction from images (optional)

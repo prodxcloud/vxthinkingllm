@@ -1,10 +1,18 @@
 """
-VaLLM Precompute Script - Build FAISS Index from CSV and JSON Data
+VaLLM Precompute Script - Build FAISS Index from Multi-Format Data
 
-This script reads all CSVs and JSONs from app/data/datasets/*.csv and *.json,
-generates embeddings using sentence-transformers, and saves a FAISS index to
-app/data/vectorstore/. JSON files like deployments.json (use_cases) are included
-for training, matching train.py behaviour.
+This script reads all supported files from app/data/datasets/ and generates
+embeddings using sentence-transformers, saving a FAISS index to
+app/data/vectorstore/.
+
+SUPPORTED FORMATS:
+==================
+    - CSV   (.csv)           - Tabular data with headers
+    - JSON  (.json)          - Arrays of objects, nested structures
+    - TXT   (.txt)           - Plain text files (chunked into sections)
+    - PDF   (.pdf)           - PDF documents (page-by-page extraction)
+    - SQL   (.sql)           - SQL files (CREATE TABLE, INSERT, comments)
+    - Excel (.xlsx, .xls)    - Excel spreadsheets (all sheets)
 
 QUICK START (run from va_llm_v1 root directory):
 ================================================
@@ -18,7 +26,7 @@ QUICK START (run from va_llm_v1 root directory):
     # Start the FastAPI server
     python -m app.app
 
-INPUT (datasets):  app/data/datasets/  (*.csv and *.json)
+INPUT (datasets):  app/data/datasets/  (*.csv, *.json, *.txt, *.pdf, *.sql, *.xlsx, *.xls)
 OUTPUT:
 =======
     app/data/vectorstore/
@@ -29,6 +37,7 @@ OUTPUT:
 import argparse
 import json
 import pickle
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -36,6 +45,18 @@ import faiss
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
+
+try:
+    import PyPDF2
+    HAVE_PDF = True
+except ImportError:
+    HAVE_PDF = False
+
+try:
+    import openpyxl  # noqa: F401
+    HAVE_EXCEL = True
+except ImportError:
+    HAVE_EXCEL = False
 
 # ============================================================================
 # EMBEDDING MODEL - Must match embeddings.py at runtime
@@ -172,6 +193,142 @@ def load_json_rows(file_path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def load_txt_rows(file_path: Path, chunk_size: int = 1000) -> List[Dict[str, Any]]:
+    """Load TXT file and chunk into embedding-ready row dicts.
+
+    Splits by section headers, then paragraphs, then fixed chunk size.
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    rows: List[Dict[str, Any]] = []
+
+    # Split by markdown-style headers or SECTION markers
+    header_pattern = r'\n(?=(?:SECTION|#{1,3}|[A-Z][A-Z\s]+:))'
+    parts = re.split(header_pattern, content)
+    sections = [p.strip() for p in parts if len(p.strip()) > 50]
+
+    # Fallback: paragraphs
+    if len(sections) <= 1:
+        paragraphs = content.split("\n\n")
+        sections = [p.strip() for p in paragraphs if len(p.strip()) > 50]
+
+    # Fallback: fixed chunks
+    if len(sections) <= 1 and len(content) > chunk_size:
+        sections = []
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i : i + chunk_size]
+            if chunk.strip():
+                sections.append(chunk.strip())
+
+    for i, section in enumerate(sections):
+        rows.append({
+            "content": section,
+            "source": file_path.name,
+            "section_index": i + 1,
+            "total_sections": len(sections),
+        })
+    return rows
+
+
+def load_pdf_rows(file_path: Path) -> List[Dict[str, Any]]:
+    """Load PDF file page-by-page into embedding-ready row dicts."""
+    if not HAVE_PDF:
+        print(f"    [WARN] PyPDF2 not installed, skipping {file_path.name}")
+        return []
+
+    reader = PyPDF2.PdfReader(file_path)
+    rows: List[Dict[str, Any]] = []
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text()
+        if text and text.strip():
+            rows.append({
+                "content": text.strip(),
+                "source": file_path.name,
+                "page": page_num + 1,
+            })
+    return rows
+
+
+def load_sql_rows(file_path: Path) -> List[Dict[str, Any]]:
+    """Load SQL file and extract meaningful statements for embedding.
+
+    Parses CREATE TABLE, INSERT, and block comments as separate documents.
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    rows: List[Dict[str, Any]] = []
+
+    # Extract block comments (often contain documentation)
+    block_comments = re.findall(r'/\*\*(.*?)\*/', content, re.DOTALL)
+    for i, comment in enumerate(block_comments):
+        text = comment.strip().lstrip("*").strip()
+        if len(text) > 30:
+            rows.append({
+                "content": text,
+                "source": file_path.name,
+                "sql_type": "comment",
+                "index": i + 1,
+            })
+
+    # Extract individual SQL statements
+    statements = re.split(r';\s*\n', content)
+    for i, stmt in enumerate(statements):
+        stmt = stmt.strip()
+        if not stmt or len(stmt) < 20:
+            continue
+        # Remove inline comments for cleaner text
+        clean = re.sub(r'--.*$', '', stmt, flags=re.MULTILINE).strip()
+        if not clean:
+            continue
+
+        # Classify statement type
+        upper = clean.upper().lstrip()
+        if upper.startswith("CREATE TABLE"):
+            sql_type = "create_table"
+        elif upper.startswith("CREATE INDEX"):
+            sql_type = "create_index"
+        elif upper.startswith("INSERT"):
+            sql_type = "insert"
+        elif upper.startswith("ALTER"):
+            sql_type = "alter"
+        elif upper.startswith("CREATE VIEW"):
+            sql_type = "create_view"
+        elif upper.startswith("CREATE FUNCTION") or upper.startswith("CREATE PROCEDURE"):
+            sql_type = "function"
+        else:
+            sql_type = "statement"
+
+        rows.append({
+            "content": clean,
+            "source": file_path.name,
+            "sql_type": sql_type,
+            "index": i + 1,
+        })
+    return rows
+
+
+def load_excel_rows(file_path: Path) -> List[Dict[str, Any]]:
+    """Load Excel file (.xlsx/.xls) — all sheets — into row dicts."""
+    if not HAVE_EXCEL:
+        print(f"    [WARN] openpyxl not installed, skipping {file_path.name}")
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    xls = pd.ExcelFile(file_path)
+    for sheet_name in xls.sheet_names:
+        frame = pd.read_excel(xls, sheet_name=sheet_name)
+        if frame.empty:
+            continue
+        for _, row in frame.iterrows():
+            row_dict = row.to_dict()
+            row_dict["_sheet"] = sheet_name
+            row_dict["_source"] = file_path.name
+            rows.append(row_dict)
+    return rows
+
+
 def use_case_to_row(uc: Dict[str, Any]) -> Dict[str, Any]:
     """Flatten a deployments.json use_case so row_to_text() can use it (prompt, intent, payload fields)."""
     row = {
@@ -207,13 +364,19 @@ def main() -> None:
         "--dataset",
         type=str,
         default=str(Path("app") / "data" / "datasets" / "cloud_deployments.csv"),
-        help="Primary CSV dataset (used first if --dataset-dir is set)",
+        help="Primary dataset file (used first if --dataset-dir is set)",
     )
     parser.add_argument(
         "--dataset-dir",
         type=str,
         default=str(Path("app") / "data" / "datasets"),
-        help="If set, embed all CSV and JSON files in this folder (recommended)",
+        help="If set, embed all supported files in this folder (recommended)",
+    )
+    parser.add_argument(
+        "--file-types",
+        type=str,
+        default="csv,json,txt,pdf,sql,xlsx,xls",
+        help="Comma-separated list of file types to include (default: csv,json,txt,pdf,sql,xlsx,xls)",
     )
     parser.add_argument(
         "--embedding-model",
@@ -233,6 +396,8 @@ def main() -> None:
 
     dataset_path = Path(args.dataset)
     dataset_dir = Path(args.dataset_dir) if args.dataset_dir else None
+    file_types = [ft.strip().lower() for ft in args.file_types.split(",")]
+
     if dataset_dir is None:
         if not dataset_path.exists():
             raise FileNotFoundError(f"Dataset not found: {dataset_path}")
@@ -244,7 +409,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # ==========================================================================
-    # STEP 1: DISCOVER AND LOAD CSV + JSON FILES
+    # STEP 1: DISCOVER AND LOAD ALL SUPPORTED FILES
     # ==========================================================================
     print("\n" + "=" * 70)
     print("VaLLM PRECOMPUTE - Building FAISS Vector Index")
@@ -252,74 +417,173 @@ def main() -> None:
 
     # Collect (row_dict, source_path, is_json_use_case) for unified processing
     all_rows: List[tuple] = []  # (row_dict, source_str, is_json_use_case)
-    csv_file_count = 0
-    json_file_count = 0
+    file_counts: Dict[str, int] = {}
+
+    def _skip_non_provisioning(path: Path) -> bool:
+        name = path.name.lower()
+        return "observability" in name or "troubleshoot" in name or "incident" in name
+
+    def _glob_type(directory: Path, ext: str) -> List[Path]:
+        return sorted(p for p in directory.glob(f"*.{ext}") if p.is_file() and not _skip_non_provisioning(p))
 
     if dataset_dir is not None:
-        def _skip_non_provisioning(path: Path) -> bool:
-            name = path.name.lower()
-            return "observability" in name or "troubleshoot" in name or "incident" in name
-        csv_paths = sorted(p for p in dataset_dir.glob("*.csv") if p.is_file() and not _skip_non_provisioning(p))
-        json_paths = sorted(p for p in dataset_dir.glob("*.json") if p.is_file() and not _skip_non_provisioning(p))
+        # Discover files by type
+        files_by_type: Dict[str, List[Path]] = {}
+        for ft in file_types:
+            paths = _glob_type(dataset_dir, ft)
+            if paths:
+                files_by_type[ft] = paths
 
-        if not csv_paths and not json_paths:
-            raise FileNotFoundError(f"No CSV or JSON files found in: {dataset_dir}")
+        if not files_by_type:
+            raise FileNotFoundError(f"No supported files ({', '.join(file_types)}) found in: {dataset_dir}")
 
-        if dataset_path.exists():
-            if dataset_path.suffix.lower() == ".csv" and dataset_path not in csv_paths:
-                csv_paths = [dataset_path] + list(csv_paths)
-            elif dataset_path.suffix.lower() == ".json" and dataset_path not in json_paths:
-                json_paths = [dataset_path] + list(json_paths)
-
-        print(f"\n[DIR] Found {len(csv_paths)} CSV and {len(json_paths)} JSON file(s) in {dataset_dir}:")
+        total_files = sum(len(v) for v in files_by_type.values())
+        print(f"\n[DIR] Found {total_files} file(s) in {dataset_dir}:")
+        for ft, paths in files_by_type.items():
+            print(f"    {ft.upper():5s}: {len(paths)} file(s)")
         print("-" * 50)
 
-        for idx, p in enumerate(csv_paths, 1):
-            try:
-                print(f"\n[{idx}/{len(csv_paths)}] CSV: {p.name}")
-                frame = pd.read_csv(p, on_bad_lines='warn')
-                row_count = len(frame)
-                csv_file_count += 1
-                print(f"    [OK] Loaded {row_count} rows x {len(frame.columns)} columns")
-                for i, row in frame.iterrows():
-                    row_dict = row.to_dict()
-                    all_rows.append((row_dict, str(p), False))
-            except Exception as e:
-                print(f"    [WARN] Could not parse: {e}")
+        global_idx = 0
 
-        for idx, p in enumerate(json_paths, 1):
-            try:
-                print(f"\n[{len(csv_paths) + idx}/{len(csv_paths) + len(json_paths)}] JSON: {p.name}")
-                rows = load_json_rows(p)
-                json_file_count += 1
-                print(f"    [OK] Loaded {len(rows)} record(s)")
-                # deployments.json use_cases have prompt + intent; other JSON may not
-                use_cases_format = len(rows) > 0 and isinstance(rows[0], dict) and "prompt" in rows[0] and "intent" in rows[0]
-                for row in rows:
-                    all_rows.append((row, str(p), bool(use_cases_format and isinstance(row, dict) and "prompt" in row)))
-            except Exception as e:
-                print(f"    [WARN] Could not parse: {e}")
+        # --- CSV ---
+        if "csv" in files_by_type:
+            csv_paths = files_by_type["csv"]
+            # Ensure primary CSV is first
+            if dataset_path.exists() and dataset_path.suffix.lower() == ".csv":
+                csv_paths = [dataset_path] + [p for p in csv_paths if p.resolve() != dataset_path.resolve()]
+            for p in csv_paths:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] CSV: {p.name}")
+                    frame = pd.read_csv(p, on_bad_lines='warn', engine='python', quotechar='"')
+                    file_counts["csv"] = file_counts.get("csv", 0) + 1
+                    print(f"    [OK] Loaded {len(frame)} rows x {len(frame.columns)} columns")
+                    for _, row in frame.iterrows():
+                        all_rows.append((row.to_dict(), str(p), False))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- JSON ---
+        if "json" in files_by_type:
+            for p in files_by_type["json"]:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] JSON: {p.name}")
+                    rows = load_json_rows(p)
+                    file_counts["json"] = file_counts.get("json", 0) + 1
+                    print(f"    [OK] Loaded {len(rows)} record(s)")
+                    use_cases_format = len(rows) > 0 and isinstance(rows[0], dict) and "prompt" in rows[0] and "intent" in rows[0]
+                    for row in rows:
+                        all_rows.append((row, str(p), bool(use_cases_format and isinstance(row, dict) and "prompt" in row)))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- TXT ---
+        if "txt" in files_by_type:
+            for p in files_by_type["txt"]:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] TXT: {p.name}")
+                    rows = load_txt_rows(p)
+                    file_counts["txt"] = file_counts.get("txt", 0) + 1
+                    print(f"    [OK] Loaded {len(rows)} chunk(s)")
+                    for row in rows:
+                        all_rows.append((row, str(p), False))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- PDF ---
+        if "pdf" in files_by_type:
+            for p in files_by_type["pdf"]:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] PDF: {p.name}")
+                    rows = load_pdf_rows(p)
+                    file_counts["pdf"] = file_counts.get("pdf", 0) + 1
+                    print(f"    [OK] Loaded {len(rows)} page(s)")
+                    for row in rows:
+                        all_rows.append((row, str(p), False))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- SQL ---
+        if "sql" in files_by_type:
+            for p in files_by_type["sql"]:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] SQL: {p.name}")
+                    rows = load_sql_rows(p)
+                    file_counts["sql"] = file_counts.get("sql", 0) + 1
+                    print(f"    [OK] Loaded {len(rows)} statement(s)")
+                    for row in rows:
+                        all_rows.append((row, str(p), False))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- Excel (xlsx) ---
+        for ext in ("xlsx", "xls"):
+            if ext in files_by_type:
+                for p in files_by_type[ext]:
+                    global_idx += 1
+                    try:
+                        print(f"\n[{global_idx}/{total_files}] EXCEL: {p.name}")
+                        rows = load_excel_rows(p)
+                        file_counts["excel"] = file_counts.get("excel", 0) + 1
+                        print(f"    [OK] Loaded {len(rows)} row(s)")
+                        for row in rows:
+                            all_rows.append((row, str(p), False))
+                    except Exception as e:
+                        print(f"    [WARN] Could not parse: {e}")
 
         total_rows = len(all_rows)
+        counts_str = " + ".join(f"{v} {k.upper()}" for k, v in file_counts.items())
         print(f"\n{'='*50}")
-        print(f"TOTAL: {total_rows} rows from {csv_file_count} CSV + {json_file_count} JSON file(s)")
+        print(f"TOTAL: {total_rows} rows from {counts_str}")
         print(f"{'='*50}")
     else:
-        # Single file (CSV or JSON)
+        # Single file mode
+        suffix = dataset_path.suffix.lower().lstrip(".")
         print(f"\n[FILE] Processing single file: {dataset_path}")
-        if dataset_path.suffix.lower() == ".json":
+
+        if suffix == "json":
             rows = load_json_rows(dataset_path)
             use_cases_format = len(rows) > 0 and isinstance(rows[0], dict) and "prompt" in rows[0] and "intent" in rows[0]
             for row in rows:
                 all_rows.append((row, str(dataset_path), bool(use_cases_format and isinstance(row, dict) and "prompt" in row)))
-            json_file_count = 1
+            file_counts["json"] = 1
             print(f"    [OK] Loaded {len(rows)} record(s) from JSON")
-        else:
-            df = pd.read_csv(dataset_path, on_bad_lines='warn')
+        elif suffix == "csv":
+            df = pd.read_csv(dataset_path, on_bad_lines='warn', engine='python', quotechar='"')
             print(f"    [OK] Loaded {len(df)} rows x {len(df.columns)} columns")
-            for i, row in df.iterrows():
+            for _, row in df.iterrows():
                 all_rows.append((row.to_dict(), str(dataset_path), False))
-            csv_file_count = 1
+            file_counts["csv"] = 1
+        elif suffix == "txt":
+            rows = load_txt_rows(dataset_path)
+            for row in rows:
+                all_rows.append((row, str(dataset_path), False))
+            file_counts["txt"] = 1
+            print(f"    [OK] Loaded {len(rows)} chunk(s) from TXT")
+        elif suffix == "pdf":
+            rows = load_pdf_rows(dataset_path)
+            for row in rows:
+                all_rows.append((row, str(dataset_path), False))
+            file_counts["pdf"] = 1
+            print(f"    [OK] Loaded {len(rows)} page(s) from PDF")
+        elif suffix == "sql":
+            rows = load_sql_rows(dataset_path)
+            for row in rows:
+                all_rows.append((row, str(dataset_path), False))
+            file_counts["sql"] = 1
+            print(f"    [OK] Loaded {len(rows)} statement(s) from SQL")
+        elif suffix in ("xlsx", "xls"):
+            rows = load_excel_rows(dataset_path)
+            for row in rows:
+                all_rows.append((row, str(dataset_path), False))
+            file_counts["excel"] = 1
+            print(f"    [OK] Loaded {len(rows)} row(s) from Excel")
+        else:
+            raise ValueError(f"Unsupported file format: .{suffix}")
 
     if not all_rows:
         raise ValueError("No rows to embed (dataset is empty or all files failed to parse)")
@@ -448,11 +712,11 @@ def main() -> None:
     print(f"\n{'='*70}")
     print("PRECOMPUTE COMPLETE!")
     print("=" * 70)
+    files_summary = "\n".join(f"    {k.upper():6s} files processed: {v}" for k, v in file_counts.items())
     print(f"""
     Summary:
     -----------------------------------------
-    CSV files processed  : {csv_file_count}
-    JSON files processed : {json_file_count}
+{files_summary}
     Documents indexed    : {len(texts)}
     Vectors created      : {index.ntotal}
     Vector dimension     : {index.d}

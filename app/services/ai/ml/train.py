@@ -66,6 +66,12 @@ try:
 except ImportError:
     HAVE_PDF = False
 
+try:
+    import openpyxl  # noqa: F401
+    HAVE_EXCEL = True
+except ImportError:
+    HAVE_EXCEL = False
+
 # ============================================================================
 # HARDCODED MODEL CONFIGURATION
 # ============================================================================
@@ -270,6 +276,84 @@ def load_txt_file(file_path: Path, chunk_size: int = 1000) -> List[Dict]:
     return rows
 
 
+def load_sql_file(file_path: Path) -> List[Dict]:
+    """Load SQL file and extract statements for training.
+
+    Parses CREATE TABLE, INSERT, block comments, etc.
+    """
+    import re
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    rows = []
+
+    # Extract block comments (documentation)
+    block_comments = re.findall(r'/\*\*(.*?)\*/', content, re.DOTALL)
+    for i, comment in enumerate(block_comments):
+        text = comment.strip().lstrip("*").strip()
+        if len(text) > 30:
+            rows.append({
+                "content": text,
+                "source": file_path.name,
+                "sql_type": "comment",
+                "index": i + 1,
+            })
+
+    # Extract individual SQL statements
+    statements = re.split(r';\s*\n', content)
+    for i, stmt in enumerate(statements):
+        stmt = stmt.strip()
+        if not stmt or len(stmt) < 20:
+            continue
+        clean = re.sub(r'--.*$', '', stmt, flags=re.MULTILINE).strip()
+        if not clean:
+            continue
+
+        upper = clean.upper().lstrip()
+        if upper.startswith("CREATE TABLE"):
+            sql_type = "create_table"
+        elif upper.startswith("CREATE INDEX"):
+            sql_type = "create_index"
+        elif upper.startswith("INSERT"):
+            sql_type = "insert"
+        elif upper.startswith("ALTER"):
+            sql_type = "alter"
+        elif upper.startswith("CREATE VIEW"):
+            sql_type = "create_view"
+        elif upper.startswith("CREATE FUNCTION") or upper.startswith("CREATE PROCEDURE"):
+            sql_type = "function"
+        else:
+            sql_type = "statement"
+
+        rows.append({
+            "content": clean,
+            "source": file_path.name,
+            "sql_type": sql_type,
+            "index": i + 1,
+        })
+    return rows
+
+
+def load_excel_file(file_path: Path) -> List[Dict]:
+    """Load Excel file (.xlsx/.xls) — all sheets — into row dicts."""
+    if not HAVE_EXCEL:
+        print(f"    [WARN] openpyxl not installed, skipping {file_path.name}")
+        return []
+
+    rows = []
+    xls = pd.ExcelFile(file_path)
+    for sheet_name in xls.sheet_names:
+        frame = pd.read_excel(xls, sheet_name=sheet_name)
+        if frame.empty:
+            continue
+        for _, row in frame.iterrows():
+            row_dict = row.to_dict()
+            row_dict["_sheet"] = sheet_name
+            row_dict["_source"] = file_path.name
+            rows.append(row_dict)
+    return rows
+
+
 def json_row_to_text(row: Dict) -> str:
     """Convert a JSON record into training text.
 
@@ -317,6 +401,40 @@ def txt_row_to_text(row: Dict) -> str:
     )
 
 
+def sql_row_to_text(row: Dict) -> str:
+    """Convert a SQL chunk into training text."""
+    content = row.get('content', '')
+    source = row.get('source', 'unknown')
+    sql_type = row.get('sql_type', 'statement')
+
+    return (
+        "You are an AI assistant for cloud operations and database management. "
+        f"Based on the following SQL {sql_type} from {source}, provide expert guidance:\n\n"
+        f"{content}\n\n"
+        "Summary and key insights:"
+    )
+
+
+def excel_row_to_text(row: Dict) -> str:
+    """Convert an Excel row into training text."""
+    row = {k: v for k, v in row.items() if not str(k).startswith("_")}
+    parts: List[str] = []
+    for k, v in row.items():
+        if v is None:
+            continue
+        sv = str(v)
+        if sv.strip() == "" or sv.strip().lower() == "nan":
+            continue
+        parts.append(f"{k}: {sv}")
+
+    return (
+        "You are an AI assistant for cloud provisioning and deployment. "
+        "Analyze the following spreadsheet record and provide insights.\n\n"
+        + " | ".join(parts)
+        + "\n\nAnswer:"
+    )
+
+
 class MultiFormatCausalLMDataset(Dataset):
     """Dataset that handles multiple file formats: CSV, JSON, TXT, PDF."""
 
@@ -343,6 +461,10 @@ class MultiFormatCausalLMDataset(Dataset):
             text = json_row_to_text(row.copy())
         elif self.source_type == 'txt':
             text = txt_row_to_text(row)
+        elif self.source_type == 'sql':
+            text = sql_row_to_text(row)
+        elif self.source_type == 'excel':
+            text = excel_row_to_text(row)
         else:  # csv, pdf, or default
             text = row_to_text(row)
 
@@ -450,7 +572,7 @@ def train(cfg: TrainConfig) -> None:
 
                 for p in csv_paths:
                     try:
-                        frame = pd.read_csv(p, on_bad_lines='warn')
+                        frame = pd.read_csv(p, on_bad_lines='warn', engine='python', quotechar='"')
                         frame['_source_type'] = 'csv'
                         frames.append(frame)
                         total_files += 1
@@ -521,6 +643,46 @@ def train(cfg: TrainConfig) -> None:
                 else:
                     print(f"⚠️  Warning: Found {len(pdf_paths)} PDF files but PyPDF2 is not installed. Skipping.")
 
+        # Process SQL files
+        if 'sql' in cfg.file_types:
+            sql_paths = sorted(p for p in cfg.dataset_dir.glob("*.sql") if p.is_file() and not _skip_non_provisioning(p))
+            if sql_paths:
+                print(f"🗃️  Found {len(sql_paths)} SQL files...")
+                for p in sql_paths:
+                    try:
+                        rows = load_sql_file(p)
+                        if rows:
+                            frame = pd.DataFrame(rows)
+                            frame['_source_type'] = 'sql'
+                            frames.append(frame)
+                            total_files += 1
+                            print(f"    ✓ Loaded {len(rows)} statements from {p.name}")
+                    except Exception as e:
+                        print(f"⚠️  Warning: Could not parse SQL {p}: {e}")
+
+        # Process Excel files
+        if 'xlsx' in cfg.file_types or 'xls' in cfg.file_types:
+            excel_paths = sorted(
+                p for p in cfg.dataset_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in ('.xlsx', '.xls') and not _skip_non_provisioning(p)
+            )
+            if excel_paths:
+                if HAVE_EXCEL:
+                    print(f"📊 Found {len(excel_paths)} Excel files...")
+                    for p in excel_paths:
+                        try:
+                            rows = load_excel_file(p)
+                            if rows:
+                                frame = pd.DataFrame(rows)
+                                frame['_source_type'] = 'excel'
+                                frames.append(frame)
+                                total_files += 1
+                                print(f"    ✓ Loaded {len(rows)} rows from {p.name}")
+                        except Exception as e:
+                            print(f"⚠️  Warning: Could not read Excel {p}: {e}")
+                else:
+                    print(f"⚠️  Warning: Found {len(excel_paths)} Excel files but openpyxl is not installed. Skipping.")
+
         if not frames:
             raise FileNotFoundError(f"No valid data files found in: {cfg.dataset_dir}")
 
@@ -537,7 +699,7 @@ def train(cfg: TrainConfig) -> None:
         print(f"   File: {cfg.dataset_path.name}")
         print(f"   Type: {suffix.lstrip('.')}")
         if suffix == '.csv':
-            df = pd.read_csv(cfg.dataset_path, on_bad_lines='warn')
+            df = pd.read_csv(cfg.dataset_path, on_bad_lines='warn', engine='python', quotechar='"')
             df['_source_type'] = 'csv'
         elif suffix == '.json':
             rows = load_json_file(cfg.dataset_path)
@@ -563,6 +725,18 @@ def train(cfg: TrainConfig) -> None:
             df = pd.DataFrame(rows)
             df['_source_type'] = 'pdf'
             print(f"   Pages extracted: {len(rows)}")
+        elif suffix == '.sql':
+            rows = load_sql_file(cfg.dataset_path)
+            df = pd.DataFrame(rows)
+            df['_source_type'] = 'sql'
+            print(f"   Statements extracted: {len(rows)}")
+        elif suffix in ('.xlsx', '.xls'):
+            if not HAVE_EXCEL:
+                raise ImportError("openpyxl is required for Excel files. Install with: pip install openpyxl")
+            rows = load_excel_file(cfg.dataset_path)
+            df = pd.DataFrame(rows)
+            df['_source_type'] = 'excel'
+            print(f"   Rows extracted: {len(rows)}")
         else:
             raise ValueError(f"Unsupported file format: {suffix}")
 
@@ -728,8 +902,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--file-types",
         type=str,
-        default="csv,json,txt,pdf",
-        help="Comma-separated list of file types to include (default: csv,json,txt,pdf)",
+        default="csv,json,txt,pdf,sql,xlsx,xls",
+        help="Comma-separated list of file types to include (default: csv,json,txt,pdf,sql,xlsx,xls)",
     )
     parser.add_argument(
         "--model-name-or-path",
@@ -756,7 +930,7 @@ def parse_args() -> TrainConfig:
 
     # Parse file types
     file_types = [ft.strip().lower() for ft in args.file_types.split(',')]
-    valid_types = {'csv', 'json', 'txt', 'pdf'}
+    valid_types = {'csv', 'json', 'txt', 'pdf', 'sql', 'xlsx', 'xls'}
     invalid = set(file_types) - valid_types
     if invalid:
         parser.error(f"Invalid file types: {invalid}. Valid types: {valid_types}")
