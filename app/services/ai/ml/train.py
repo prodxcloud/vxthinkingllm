@@ -74,12 +74,12 @@ except ImportError:
 # ULTRA TINY (< 50MB) - Fastest, great for testing:
 # LLM_MODEL_NAME = "sshleifer/tiny-gpt2"                  # ~2MB, instant on CPU
 # LLM_MODEL_NAME = "roneneldan/TinyStories-1M"          # ~4MB, 1M params
-LLM_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"          # ~32MB, 8M params
+# LLM_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"          # ~32MB, 8M params
 # LLM_MODEL_NAME = "Qwen/Qwen2.5-Coder-7B-Instruct"       # ~15GB VRAM
 # LLM_MODEL_NAME = "roneneldan/TinyStories-33M"         # ~130MB, 33M params
 #
 # FOR CPU / LOW VRAM (< 8GB) - Good quality:
-# LLM_MODEL_NAME = "distilgpt2"                         # ~350MB, runs on CPU
+LLM_MODEL_NAME = "distilgpt2"                         # ~350MB, runs on CPU
 # FOR MEDIUM GPU (8-12GB VRAM):
 # LLM_MODEL_NAME = "microsoft/phi-2"                    # 2.7B params, ~6GB VRAM
 # LLM_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0" # 1.1B params, ~3GB VRAM
@@ -87,6 +87,22 @@ LLM_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"          # ~32MB, 8M p
 # LLM_MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"  # ~16GB VRAM
 # FOR HIGH-END GPU (16GB+ VRAM):
 # LLM_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2" # 7B params, ~14GB VRAM
+
+# PRODUCTION MODELS (requires GPU)
+# LLM_MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+# One of the best open models.
+# LLM_MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+# Very strong reasoning.
+# DEVOPS / CODING MODELS
+# LLM_MODEL_NAME = "Qwen/Qwen2.5-Coder-7B-Instruct"
+# Excellent for infrastructure code.
+# LLM_MODEL_NAME = "microsoft/phi-2"
+# 2.7B params. Great reasoning with low VRAM.
+# LLM_MODEL_NAME = "deepseek-ai/deepseek-coder-1.3b-instruct"
+# Strong for DevOps scripting.
+
+# LLM_MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"
+# High-end inference quality.
 # ============================================================================
 from torch.utils.data import Dataset
 from transformers import (
@@ -600,11 +616,17 @@ def train(cfg: TrainConfig) -> None:
     print(f"   Logging steps: {log_every}")
     print(f"   Device: {'cuda' if use_cuda else 'cpu'} ({device_count} device(s))")
 
+    cpu_batch_size = min(cfg.per_device_train_batch_size, 1) if not use_cuda else cfg.per_device_train_batch_size
+    cpu_grad_accum = max(cfg.gradient_accumulation_steps, 16) if not use_cuda else cfg.gradient_accumulation_steps
+
+    if not use_cuda and (cpu_batch_size != cfg.per_device_train_batch_size or cpu_grad_accum != cfg.gradient_accumulation_steps):
+        print(f"⚠️  CPU mode: adjusted batch_size {cfg.per_device_train_batch_size}→{cpu_batch_size}, "
+              f"grad_accum {cfg.gradient_accumulation_steps}→{cpu_grad_accum} to avoid OOM")
+
     training_args = TrainingArguments(
         output_dir=str(cfg.output_dir / "_checkpoints"),
-        overwrite_output_dir=True,
-        per_device_train_batch_size=cfg.per_device_train_batch_size,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        per_device_train_batch_size=cpu_batch_size,
+        gradient_accumulation_steps=cpu_grad_accum,
         num_train_epochs=cfg.num_train_epochs,
         learning_rate=cfg.learning_rate,
         weight_decay=cfg.weight_decay,
@@ -617,6 +639,7 @@ def train(cfg: TrainConfig) -> None:
         bf16=bf16,
         fp16=fp16,
         dataloader_num_workers=0,
+        dataloader_pin_memory=use_cuda,
         disable_tqdm=False,
         report_to=[],
     )
@@ -643,7 +666,7 @@ def train(cfg: TrainConfig) -> None:
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         callbacks=[ProgressPrinter()],
     )
 

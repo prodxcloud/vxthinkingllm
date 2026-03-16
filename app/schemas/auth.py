@@ -19,7 +19,7 @@ from app.schemas.common import BaseSchema
 class ApiKeyInfo(BaseSchema):
     """Public-facing API key info returned after validation."""
     id: Optional[str] = Field(None, description="UUID primary key")
-    name: Optional[str] = Field(None, max_length=100)
+    tenant_name: Optional[str] = Field(None, max_length=255)
     environment: Optional[str] = Field("DEVELOPMENT", max_length=20)
     is_active: Optional[bool] = True
     is_read_only: Optional[bool] = False
@@ -31,16 +31,13 @@ class ApiKeyInfo(BaseSchema):
 
 
 # ---------------------------------------------------------------------------
-# Caller Identity (resolved from Developer key)
+# Caller Identity (resolved from Tenant key)
 # ---------------------------------------------------------------------------
 
 class CallerIdentity(BaseSchema):
-    """Identity of the authenticated caller, resolved from the developer key."""
-    developer_id: Optional[str] = None
-    developer_name: str
-    email: Optional[str] = None
+    """Identity of the authenticated caller, resolved from the tenant key."""
     tenant_id: Optional[str] = None
-    tenant_name: Optional[str] = None
-    api_key_name: str
+    tenant_name: str
+    email: Optional[str] = None
     api_key_environment: str
     scopes: Optional[Dict[str, Any]] = None

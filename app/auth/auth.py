@@ -1,7 +1,7 @@
 """
 VaLLM Authentication via X-API-Key
 ====================================
-Validates incoming requests against the developers table.
+Validates incoming requests against the tenants table.
 
 Usage in routes:
     from app.auth.auth import require_api_key, get_caller_identity
@@ -60,7 +60,7 @@ async def require_api_key(
     Supports three modes:
     1. AUTH_DISABLED=true  -> skip validation entirely (dev only)
     2. INTERNAL_SERVICE_KEY -> bypass DB if key matches (service-to-service)
-    3. DB lookup           -> hash key and check developers table
+    3. DB lookup           -> hash key and check tenants table
     """
     # Dev bypass
     if AUTH_DISABLED:
@@ -80,28 +80,28 @@ async def require_api_key(
     # Database validation
     try:
         from app.orm.session import SessionLocal
-        from app.orm.models import Developer
+        from app.orm.models import Tenant
 
         token_hash = _hash_api_key(api_key)
         db = SessionLocal()
         try:
-            dev_record = (
-                db.query(Developer)
+            tenant_record = (
+                db.query(Tenant)
                 .filter(
-                    Developer.token_hash == token_hash,
-                    Developer.is_active == True,
+                    Tenant.token_hash == token_hash,
+                    Tenant.is_active == True,
                 )
                 .first()
             )
-            if not dev_record:
+            if not tenant_record:
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
-            if dev_record.is_expired:
+            if tenant_record.is_expired:
                 raise HTTPException(status_code=401, detail="API key has expired")
 
             # Check if "vallm" service is allowed
-            if dev_record.disallowed_services:
-                disallowed = dev_record.disallowed_services
+            if tenant_record.disallowed_services:
+                disallowed = tenant_record.disallowed_services
                 if isinstance(disallowed, list) and "vallm" in disallowed:
                     raise HTTPException(status_code=403, detail="API key does not have access to VaLLM")
                 elif isinstance(disallowed, dict) and disallowed.get("vallm"):
@@ -123,62 +123,51 @@ async def get_caller_identity(
     api_key: str = Depends(require_api_key),
 ):
     """
-    Resolve the full caller identity from the validated developer key.
-    Returns a CallerIdentity schema with developer and tenant details.
+    Resolve the full caller identity from the validated tenant key.
+    Returns a CallerIdentity schema with tenant details.
     """
     from app.schemas.auth import CallerIdentity
 
     # Dev bypass returns a placeholder identity
     if AUTH_DISABLED:
         return CallerIdentity(
-            developer_id="dev-bypass",
-            developer_name="dev-user",
+            tenant_id="dev-bypass",
+            tenant_name="dev-tenant",
             email="dev@localhost",
-            api_key_name="dev-bypass",
             api_key_environment="DEVELOPMENT",
         )
 
     # Internal service key returns a service identity
     if INTERNAL_SERVICE_KEY and api_key == INTERNAL_SERVICE_KEY:
         return CallerIdentity(
-            developer_id="internal-service",
-            developer_name="infinityai-service",
+            tenant_id="internal-service",
+            tenant_name="infinityai-service",
             email="service@infinityai.local",
-            api_key_name="internal-service-key",
             api_key_environment="PRODUCTION",
         )
 
     # Full DB lookup
     try:
         from app.orm.session import SessionLocal
-        from app.orm.models import Developer, Tenant
+        from app.orm.models import Tenant
 
         token_hash = _hash_api_key(api_key)
         db = SessionLocal()
         try:
-            dev_record = (
-                db.query(Developer)
-                .filter(Developer.token_hash == token_hash, Developer.is_active == True)
+            tenant_record = (
+                db.query(Tenant)
+                .filter(Tenant.token_hash == token_hash, Tenant.is_active == True)
                 .first()
             )
-            if not dev_record:
+            if not tenant_record:
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
-            tenant_name = None
-            if dev_record.tenant_id:
-                tenant = db.query(Tenant).filter(Tenant.id == dev_record.tenant_id).first()
-                if tenant:
-                    tenant_name = tenant.tenant_name
-
             return CallerIdentity(
-                developer_id=str(dev_record.id),
-                developer_name=dev_record.name,
-                email=dev_record.email,
-                tenant_id=str(dev_record.tenant_id) if dev_record.tenant_id else None,
-                tenant_name=tenant_name,
-                api_key_name=dev_record.name,
-                api_key_environment=dev_record.environment,
-                scopes=dev_record.scopes,
+                tenant_id=str(tenant_record.id),
+                tenant_name=tenant_record.tenant_name,
+                email=tenant_record.email,
+                api_key_environment=tenant_record.environment,
+                scopes=tenant_record.scopes,
             )
         finally:
             db.close()

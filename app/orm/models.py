@@ -2,14 +2,14 @@
 ORM Models for VaLLM
 =====================
 Two tables only:
-  - developers    : Developer API keys for authenticating requests
-  - tenants       : Tenant registry (tracks where we deployed, with sub-users)
+  - tenants     : Tenant registry with API key auth and sub-tenant management
+  - sessions    : Records every session and request against VaLLM
 """
 
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Boolean, DateTime, Text,
-    ForeignKey, func,
+    Float, func,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
@@ -23,52 +23,27 @@ from app.orm.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 class Tenant(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
-    Tenant registry.
-    Tracks where we deployed and who the sub-users are.
-    A tenant can have many sub-users stored as JSON.
+    Tenant registry with built-in API key authentication.
+    Tracks where VaLLM is deployed, who the sub-tenants are,
+    and manages access control per tenant.
     """
 
     __tablename__ = "tenants"
 
+    # --- Identity ---
     tenant_name = Column(String(255), nullable=False, unique=True)
-
-    # Sub-users list stored as JSON array
-    # e.g. [{"name": "Alice", "email": "alice@acme.com", "role": "admin"}, ...]
-    tenants_sub_users = Column(JSONB, nullable=True, server_default="[]")
-
-    # Relationships
-    developers = relationship("Developer", back_populates="tenant")
-
-    def __repr__(self) -> str:
-        return f"<Tenant(id={self.id}, tenant_name={self.tenant_name!r})>"
-
-
-# ---------------------------------------------------------------------------
-# 2. Developer (API Keys)
-# ---------------------------------------------------------------------------
-
-class Developer(Base, UUIDPrimaryKeyMixin):
-    """
-    Developer API key for authenticating requests to VaLLM.
-    Each developer key is tied to a tenant.
-    The token_hash is SHA-256 of the raw key issued.
-    """
-
-    __tablename__ = "developers"
-
-    # Developer identity
-    name = Column(String(100), nullable=False)
     email = Column(String(254), nullable=True)
     description = Column(Text, nullable=True)
 
-    # Tenant FK
-    tenant_id = Column(PG_UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
+    # --- Sub-tenants ---
+    # e.g. [{"name": "Alice", "email": "alice@acme.com", "role": "admin"}, ...]
+    sub_tenants = Column(JSONB, nullable=True, server_default="[]")
 
-    # Key & environment
-    environment = Column(String(20), nullable=False, default="DEVELOPMENT")
+    # --- API Key & Environment ---
     token_hash = Column(String(128), nullable=False)
+    environment = Column(String(20), nullable=False, default="DEVELOPMENT")
 
-    # Scope & access
+    # --- Scope & Access Control ---
     allowed_services = Column(JSONB, nullable=True)
     disallowed_services = Column(JSONB, nullable=True)
     scopes = Column(JSONB, nullable=True)
@@ -77,18 +52,17 @@ class Developer(Base, UUIDPrimaryKeyMixin):
     last_ip = Column(String(45), nullable=True)
     allowed_ips = Column(JSONB, nullable=True)
 
-    # Timestamps & lifecycle
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    # --- Lifecycle ---
     is_active = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     usage_count = Column(Integer, nullable=False, default=0)
 
-    # Metadata
+    # --- Metadata ---
     metadata_ = Column("metadata", JSONB, nullable=True)
 
-    # Relationships
-    tenant = relationship("Tenant", back_populates="developers")
+    # --- Relationships ---
+    sessions = relationship("Session", back_populates="tenant")
 
     @property
     def is_expired(self) -> bool:
@@ -101,4 +75,53 @@ class Developer(Base, UUIDPrimaryKeyMixin):
         return self.is_active and not self.is_expired
 
     def __repr__(self) -> str:
-        return f"<Developer(id={self.id}, name={self.name!r}, active={self.is_active})>"
+        return f"<Tenant(id={self.id}, tenant_name={self.tenant_name!r}, active={self.is_active})>"
+
+
+# ---------------------------------------------------------------------------
+# 2. Session (request log)
+# ---------------------------------------------------------------------------
+
+class Session(Base, UUIDPrimaryKeyMixin):
+    """
+    Records every session and request against VaLLM.
+    Used for audit logging, usage analytics, and billing.
+    """
+
+    __tablename__ = "sessions"
+
+    # --- Tenant FK ---
+    tenant_id = Column(PG_UUID(as_uuid=True), nullable=True, index=True)
+
+    # --- Request details ---
+    request_path = Column(String(500), nullable=True)
+    request_method = Column(String(10), nullable=True)
+    query_text = Column(Text, nullable=True)
+    api_version = Column(String(10), nullable=True)
+
+    # --- Response details ---
+    status_code = Column(Integer, nullable=True)
+    response_time_ms = Column(Float, nullable=True)
+    tokens_used = Column(Integer, nullable=True, default=0)
+
+    # --- Client info ---
+    client_ip = Column(String(45), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+
+    # --- Result metadata ---
+    intent_detected = Column(String(100), nullable=True)
+    confidence = Column(Float, nullable=True)
+    model_version = Column(String(50), nullable=True)
+
+    # --- Timestamps ---
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # --- Extra ---
+    metadata_ = Column("metadata", JSONB, nullable=True)
+
+    # --- Relationships ---
+    tenant = relationship("Tenant", back_populates="sessions", foreign_keys=[tenant_id],
+                          primaryjoin="Session.tenant_id == Tenant.id")
+
+    def __repr__(self) -> str:
+        return f"<Session(id={self.id}, tenant_id={self.tenant_id}, path={self.request_path!r})>"

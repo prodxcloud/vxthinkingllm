@@ -44,8 +44,8 @@ logs/
 *.log.*
 
 # Data files (mounted as volumes, not needed in image)
-app/data/
-*.csv
+# app/data/
+# *.csv
 *.pdf
 *.pkl
 *.bin

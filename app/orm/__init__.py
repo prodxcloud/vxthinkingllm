@@ -1,17 +1,17 @@
 """
 VaLLM ORM Layer
 ================
-SQLAlchemy models for Developer keys and Tenants.
+SQLAlchemy models for Tenants and Sessions.
 """
 
 from app.orm.base import Base
-from app.orm.models import Developer, Tenant
+from app.orm.models import Tenant, Session
 from app.orm.session import SessionLocal, get_db, get_db_context, engine
 
 __all__ = [
     "Base",
-    "Developer",
     "Tenant",
+    "Session",
     "SessionLocal",
     "get_db",
     "get_db_context",

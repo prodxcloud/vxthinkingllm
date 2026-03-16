@@ -49,3 +49,5 @@ Thumbs.db
 # ./app/data/
 # app/data
 /app/logs/
+app/data/models/
+app/data/vectorstore/

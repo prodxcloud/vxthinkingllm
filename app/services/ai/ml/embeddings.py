@@ -249,6 +249,29 @@ class VectorStore:
 
         return results
 
+    async def get_vector_store_stats(self) -> Dict[str, Any]:
+        """Return stats about the FAISS index, documents, and cache."""
+        total_vectors = self.faiss_index.ntotal if self.faiss_index else 0
+        stats: Dict[str, Any] = {
+            "total_vectors": total_vectors,
+            "total_documents": len(self.documents),
+            "embedding_model": self.model_name,
+            "embedding_dim": self.embedding_dim,
+            "index_type": type(self.faiss_index).__name__ if self.faiss_index else None,
+            "device": self.device,
+        }
+
+        by_type: Dict[str, int] = {}
+        for meta in self.metadata:
+            doc_type = meta.get("type", "untyped")
+            by_type[doc_type] = by_type.get(doc_type, 0) + 1
+        stats["by_type"] = by_type
+
+        if _CACHE_AVAILABLE:
+            stats["cache"] = get_all_cache_stats()
+
+        return stats
+
     async def get_context(self, query: str, top_k: int = 10) -> str:
         results = await self.search(query, top_k=top_k)
         return "\n".join([f"[{i+1}] {r['metadata'].get('type','').upper()}: {r['document']}" for i, r in enumerate(results)])

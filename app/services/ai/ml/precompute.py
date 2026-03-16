@@ -39,11 +39,19 @@ from sentence_transformers import SentenceTransformer
 
 # ============================================================================
 # EMBEDDING MODEL - Must match embeddings.py at runtime
-# Use a sentence-transformers model (e.g. all-MiniLM-L6-v2). Do NOT use
-# causal LLMs like Qwen/Qwen2.5-3B; they are not built for similarity embeddings.
+# Choose a sentence-transformers model optimized for semantic similarity.
+# These work well for DevOps agents retrieving logs, docs, commands, runbooks.
 # ============================================================================
+
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-# EMBEDDING_MODEL_NAME = "roneneldan/TinyStories-1M"          # ~4MB, 1M params
+# ⭐ Most common default. Very fast, ~80MB, 384-dim. Good balance of speed and accuracy.
+
+# Other options (uncomment ONE to switch, and update embeddings.py to match):
+# EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"   # ~120MB, higher quality
+# EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-MiniLM-L3-v2"  # ~60MB, fastest
+# EMBEDDING_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # multilingual
+# EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"  # ~100MB, strong RAG quality
+# EMBEDDING_MODEL_NAME = "roneneldan/TinyStories-1M"  # DO NOT USE - causal LM, OOM on CPU
 
 # ============================================================================
 

@@ -1,7 +1,7 @@
 """
 ORM Base Models & Mixins for VaLLM
 ====================================
-Base classes for Developer and Tenant models.
+Base classes for Tenant and Session models.
 """
 
 import uuid

@@ -108,6 +108,65 @@ def _raw_to_golang_payload(raw: Dict[str, Any], intent: str) -> Dict[str, Any]:
         payload["ssh_username"] = v("ssh_username", "ubuntu")
         payload["key_pair_name"] = v("key_pair_name")
 
+    elif intent == "provision_github":
+        payload["repo_name"] = v("repo_name")
+        payload["visibility"] = v("visibility", "private")
+        payload["default_branch"] = v("default_branch", "main")
+
+    elif intent == "provision_github_actions":
+        payload["repo_name"] = v("repo_name")
+        payload["workflow_name"] = v("workflow_name")
+        payload["runner_type"] = v("runner_type", "self-hosted")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+        payload["instance_type"] = v("instance_type", "t3.medium")
+        payload["region"] = v("region", "us-east-1")
+        payload["stack"] = v("stack")
+
+    elif intent == "provision_cicd_pipeline":
+        payload["pipeline_name"] = v("pipeline_name")
+        payload["pipeline_type"] = v("pipeline_type")
+        payload["repo_url"] = v("repo_url")
+        payload["branch"] = v("branch", "main")
+        payload["stages"] = v("stages", "build,test,deploy")
+
+    elif intent == "provision_serverless":
+        payload["function_name"] = v("function_name")
+        payload["runtime"] = v("runtime", "python3.12")
+        payload["handler"] = v("handler")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+        payload["region"] = v("region", "us-east-1")
+        payload["trigger"] = v("trigger", "http")
+
+    elif intent == "provision_cdn":
+        payload["distribution_name"] = v("distribution_name")
+        payload["origin"] = v("origin")
+        payload["custom_domain"] = v("custom_domain")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+
+    elif intent == "provision_network":
+        payload["vpc_name"] = v("vpc_name")
+        payload["cidr_block"] = v("cidr_block", "10.0.0.0/16")
+        payload["subnet_count"] = vi("subnet_count", 3)
+        payload["region"] = v("region", "us-east-1")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+
+    elif intent == "provision_backup":
+        payload["backup_target"] = v("backup_target")
+        payload["schedule"] = v("schedule", "daily")
+        payload["retention_days"] = vi("retention_days", 30)
+        payload["storage_destination"] = v("storage_destination", "s3")
+
+    elif intent == "provision_agent":
+        payload["agent_name"] = v("agent_name")
+        payload["model_name"] = v("model_name")
+        payload["runtime"] = v("runtime", "docker")
+        payload["gpu"] = v("gpu", "false")
+
+    elif intent == "provision_workflow":
+        payload["workflow_name"] = v("workflow_name")
+        payload["steps"] = v("steps")
+        payload["export_format"] = v("export_format", "terraform")
+
     # Common optional fields
     for key in ("region", "cloud_provider", "hostname", "ssh_username", "key_pair_name"):
         if key not in payload and v(key):

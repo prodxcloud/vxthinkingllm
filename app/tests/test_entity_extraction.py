@@ -137,6 +137,31 @@ def test_entity_extraction_comprehensive():
             }
         },
         
+        # IAM / Networking Cases
+        {
+            "query": "Create an IAM role for EC2 instances in us-west-2",
+            "expected": {
+                "region": "us-west-2"
+            }
+        },
+        {
+            "query": "Create a VPC with CIDR 10.0.0.0/16 in us-east-1",
+            "expected": {
+                "region": "us-east-1"
+            }
+        },
+        {
+            "query": "Create a security group allowing port 443 from 10.0.0.0/16",
+            "expected": {}
+        },
+        {
+            "query": "Create an Application Load Balancer on port 80 in us-west-2",
+            "expected": {
+                "region": "us-west-2",
+                "http_port": 80
+            }
+        },
+
         # Edge Cases
         {
             "query": "Deploy my-awesome-app to staging.company-website.com on port 3000",
