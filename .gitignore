@@ -46,6 +46,6 @@ Thumbs.db
 *.pkl.tar.bz2
 *.pkl.tar.zip
 *.pkl.tar.tar
-./app/data/
-app/data
+# ./app/data/
+# app/data
 /app/logs/
