@@ -1119,7 +1119,7 @@ if __name__ == "__main__":
             pass
 
     uvicorn.run(
-        app,  # Pass the app object directly to avoid double import issues
+        app, 
         host="0.0.0.0",
         port=8746,
         reload=False
