@@ -43,3 +43,4 @@ Thumbs.db
 *.pkl.tar.gz
 *.pkl.tar.bz2
 *.pkl.tar.zip
+./app/data/datasets
