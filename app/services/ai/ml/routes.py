@@ -646,8 +646,31 @@ async def query_endpoint(
             )
 
             # Simple response from top result
+            # DO NOT guess intent - use exact matches from knowledge base only
             if search_results:
                 top_result = search_results[0]
+                top_score = top_result.get('score', 0.0)
+                
+                # Only return response if we have a strong match (score > 0.3)
+                if top_score < 0.3:
+                    return {
+                        "response": "No strong match found in knowledge base. Please provide more specific details about your provisioning request.",
+                        "context": [
+                            {
+                                "document": r.get('document', ''),
+                                "type": r.get('metadata', {}).get('type', 'unknown') if isinstance(r.get('metadata'), dict) else 'unknown',
+                                "score": r.get('score', 0.0)
+                            }
+                            for r in search_results
+                        ],
+                        "model": "vallm-v1",
+                        "usage": {
+                            "tokens": len(request.query.split())
+                        },
+                        "warning": "Low confidence match - response may not be accurate"
+                    }
+                
+                # Return exact match from knowledge base
                 return {
                     "response": top_result.get('document', 'No content available'),
                     "context": [
@@ -661,16 +684,19 @@ async def query_endpoint(
                     "model": "vallm-v1",
                     "usage": {
                         "tokens": len(request.query.split())
-                    }
+                    },
+                    "confidence": top_score,
+                    "source": "knowledge_base"
                 }
             else:
                 return {
-                    "response": "No relevant information found in the knowledge base.",
+                    "response": "No relevant information found in the knowledge base. Please check cloud_operations_provisionning_knowledge1.txt, knowledge2.txt, or db.csv for available patterns.",
                     "context": [],
                     "model": "vallm-v1",
                     "usage": {
                         "tokens": len(request.query.split())
-                    }
+                    },
+                    "confidence": 0.0
                 }
     
     except HTTPException as e:

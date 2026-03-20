@@ -6,6 +6,7 @@ Non-provisioning queries return query_type "other". Used by InfinityAI cloud age
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -180,6 +181,134 @@ def _classify_non_provisioning(query: str) -> str:
     return "other"
 
 
+def _ensure_complete_payload(payload: Dict[str, Any], intent: str, raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure payload has all required fields based on intent and knowledge files.
+    Follows cloud_operations_provisionning_knowledge1.txt and knowledge2.txt requirements.
+    """
+    def v(key: str, default: str = "") -> str:
+        val = raw.get(key) or payload.get(key)
+        if val is None or (isinstance(val, str) and val.strip().lower() in ("", "nan")):
+            return default
+        return str(val).strip()
+    
+    # Add common required fields
+    if "username" not in payload or not payload["username"]:
+        payload["username"] = v("username", "default_user")
+    
+    if "cloud_provider" not in payload or not payload["cloud_provider"]:
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+    
+    if "region" not in payload or not payload["region"]:
+        payload["region"] = v("region", "us-east-1")
+    
+    # Intent-specific required fields based on knowledge files
+    if intent == "provision_vm":
+        if "instance_type" not in payload or not payload["instance_type"]:
+            payload["instance_type"] = v("instance_type", "t2.micro")
+        if "os" not in payload or not payload["os"]:
+            payload["os"] = v("os", "ubuntu")
+        if "volume_size" not in payload:
+            payload["volume_size"] = int(v("volume_size_gb", "30"))
+        if "volume_type" not in payload or not payload["volume_type"]:
+            payload["volume_type"] = v("volume_type", "gp3")
+        if "environment" not in payload or not payload["environment"]:
+            payload["environment"] = v("environment", "dev")
+        if "instance_name" not in payload or not payload["instance_name"]:
+            payload["instance_name"] = v("instance_name") or v("hostname") or f"vm-{int(time.time())}"
+        if "resource_name" not in payload:
+            payload["resource_name"] = payload["instance_name"]
+        if "ssh_username" not in payload or not payload["ssh_username"]:
+            payload["ssh_username"] = v("ssh_username", "ubuntu")
+    
+    elif intent == "provision_kubernetes":
+        if "cluster_name" not in payload or not payload["cluster_name"]:
+            payload["cluster_name"] = v("cluster_name") or f"k8s-cluster-{int(time.time())}"
+        if "node_count" not in payload:
+            payload["node_count"] = int(v("node_count", "2"))
+        if "node_type" not in payload or not payload["node_type"]:
+            payload["node_type"] = v("node_type", "t3.medium")
+        if "kubernetes_version" not in payload or not payload["kubernetes_version"]:
+            payload["kubernetes_version"] = v("kubernetes_version", "1.28")
+    
+    elif intent == "provision_docker":
+        if "docker_image" not in payload or not payload["docker_image"]:
+            payload["docker_image"] = v("docker_image", "nginx:latest")
+        if "container_name" not in payload or not payload["container_name"]:
+            payload["container_name"] = v("container_name") or f"container-{int(time.time())}"
+        if "ports" not in payload or not payload["ports"]:
+            # Default ports based on image
+            image = payload.get("docker_image", "").lower()
+            if "nginx" in image:
+                payload["ports"] = "80:80"
+            elif "postgres" in image:
+                payload["ports"] = "5432:5432"
+            elif "redis" in image:
+                payload["ports"] = "6379:6379"
+            else:
+                payload["ports"] = v("ports", "8080:8080")
+        if "hostname" not in payload or not payload["hostname"]:
+            payload["hostname"] = v("hostname", "")
+        if "ssh_username" not in payload or not payload["ssh_username"]:
+            payload["ssh_username"] = v("ssh_username", "ubuntu")
+        if "key_pair_name" not in payload or not payload["key_pair_name"]:
+            payload["key_pair_name"] = v("key_pair_name", "")
+    
+    elif intent == "provision_fastapi":
+        if "hostname" not in payload or not payload["hostname"]:
+            payload["hostname"] = v("hostname", "")
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name") or f"fastapi-app-{int(time.time())}"
+        if "app_port" not in payload:
+            payload["app_port"] = int(v("app_port", "8000"))
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "ssh_username" not in payload or not payload["ssh_username"]:
+            payload["ssh_username"] = v("ssh_username", "ubuntu")
+        if "key_pair_name" not in payload or not payload["key_pair_name"]:
+            payload["key_pair_name"] = v("key_pair_name", "")
+    
+    elif intent == "provision_static_website":
+        if "hostname" not in payload or not payload["hostname"]:
+            payload["hostname"] = v("hostname", "")
+        if "server_name" not in payload or not payload["server_name"]:
+            # server_name MUST always match hostname per knowledge file
+            payload["server_name"] = payload.get("hostname", "") or v("server_name", "")
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "ssh_username" not in payload or not payload["ssh_username"]:
+            payload["ssh_username"] = v("ssh_username", "ubuntu")
+        if "key_pair_name" not in payload or not payload["key_pair_name"]:
+            payload["key_pair_name"] = v("key_pair_name", "")
+    
+    elif intent == "provision_database":
+        if "hostname" not in payload or not payload["hostname"]:
+            payload["hostname"] = v("hostname", "")
+        if "database_engine" not in payload or not payload["database_engine"]:
+            payload["database_engine"] = v("database_engine", "postgres")
+        if "database_name" not in payload or not payload["database_name"]:
+            payload["database_name"] = v("database_name") or f"db-{int(time.time())}"
+        if "database_user" not in payload or not payload["database_user"]:
+            payload["database_user"] = v("database_user", "admin")
+        if "port" not in payload:
+            # Default ports based on engine
+            engine = payload.get("database_engine", "").lower()
+            if "postgres" in engine:
+                payload["port"] = int(v("port", "5432"))
+            elif "mysql" in engine or "mariadb" in engine:
+                payload["port"] = int(v("port", "3306"))
+            elif "mongodb" in engine:
+                payload["port"] = int(v("port", "27017"))
+            else:
+                payload["port"] = int(v("port", "5432"))
+        if "ssh_username" not in payload or not payload["ssh_username"]:
+            payload["ssh_username"] = v("ssh_username", "ubuntu")
+        if "key_pair_name" not in payload or not payload["key_pair_name"]:
+            payload["key_pair_name"] = v("key_pair_name", "")
+    
+    return payload
+
+
 @router.post("/provision-intent")
 async def provision_intent(
     request: ProvisionIntentRequest,
@@ -239,7 +368,7 @@ async def provision_intent(
 
     # Require minimum confidence (e.g. score > 0.3 for cosine-like scores; adjust if your metric differs)
     confidence = float(score)
-    if confidence < 0.2:
+    if confidence < 0.3:
         query_type = _classify_non_provisioning(query)
         return {
             "query_type": query_type,
@@ -249,6 +378,7 @@ async def provision_intent(
             "match_prompt": match_prompt,
         }
 
+    # Build complete payload following knowledge files structure
     payload = _raw_to_golang_payload(raw, intent)
     
     # Extract entities from user query and override matched values
@@ -257,10 +387,17 @@ async def provision_intent(
         logger.info(f"Overriding matched payload with extracted entities: {extracted_entities}")
         payload.update(extracted_entities)
     
+    # Ensure all required fields are present based on intent and knowledge files
+    payload = _ensure_complete_payload(payload, intent, raw)
+    
     return {
         "query_type": "provisioning",
         "intent": intent,
         "payload": payload,
         "confidence": confidence,
         "match_prompt": match_prompt,
+        "metadata": {
+            "source": "knowledge_base",
+            "matched_document": best.get("document", "")[:200] if best.get("document") else None
+        }
     }

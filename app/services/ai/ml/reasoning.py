@@ -120,9 +120,15 @@ class ReasoningEngine:
         }
     
     async def _detect_intent(self, query: str) -> str:
-        """Detect user intent from query"""
+        """
+        Detect user intent from query.
+        DO NOT guess - use exact matches from knowledge base only.
+        Returns 'provision' if provisioning keywords found, otherwise 'unknown'.
+        """
         query_lower = query.lower()
         
+        # Only detect provisioning intent if keywords are present
+        # Do not guess other intents - let the knowledge base determine
         scores = {}
         for intent, keywords in self.intent_keywords.items():
             score = sum(1 for keyword in keywords if keyword in query_lower)
@@ -132,7 +138,8 @@ class ReasoningEngine:
         if scores:
             return max(scores.items(), key=lambda x: x[1])[0]
         
-        return 'general'
+        # Return 'unknown' instead of 'general' - let knowledge base determine
+        return 'unknown'
     
     async def _format_context(self, results: List[Dict[str, Any]]) -> str:
         """Format search results into context string"""
@@ -219,30 +226,72 @@ class ReasoningEngine:
         synthesis: Dict[str, Any],
         intent: str
     ) -> Dict[str, Any]:
-        """Make final decision or recommendation"""
-        recommendation_parts = []
+        """
+        Make final decision or recommendation.
+        MUST follow procedures from cloud_operations_provisionning_knowledge1.txt and knowledge2.txt.
+        DO NOT guess intent - use exact matches from knowledge base only.
+        """
+        # Get the best matching document from context
+        context_results = await self.vector_store.search(query, top_k=1)
         
-        # Provisioning-only recommendations
-        if intent == 'provision':
-            recommendation_parts.append("Based on the context, I recommend:")
-            recommendation_parts.append("1. Review similar resource configurations")
-            recommendation_parts.append("2. Check compliance and security requirements")
-            recommendation_parts.append("3. Validate against existing infrastructure patterns")
-            recommendation_parts.append("4. Apply deployment best practices from the knowledge base")
-        else:
-            recommendation_parts.append("Based on the available context:")
-            recommendation_parts.append("1. Review relevant deployment configurations and resources")
-            recommendation_parts.append("2. Check for similar provisioning patterns in the infrastructure")
-            recommendation_parts.append("3. Consider best practices for cloud provisioning")
+        if not context_results:
+            # No match found - return generic response, do not guess
+            return {
+                'recommendation': "No matching provisioning pattern found in knowledge base. Please provide more specific details about the resource you want to provision.",
+                'confidence': 0.0,
+                'metadata': {
+                    'intent': 'unknown',
+                    'reasoning_steps': 0,
+                    'matched': False
+                }
+            }
+        
+        best_match = context_results[0]
+        match_score = best_match.get('score', 0.0)
+        match_doc = best_match.get('document', '')
+        match_meta = best_match.get('metadata', {})
+        
+        # Only proceed if we have a strong match (score > 0.3 for cosine similarity)
+        if match_score < 0.3:
+            return {
+                'recommendation': "No strong match found in knowledge base. Please provide more specific details.",
+                'confidence': match_score,
+                'metadata': {
+                    'intent': 'unknown',
+                    'reasoning_steps': 0,
+                    'matched': False,
+                    'best_score': match_score
+                }
+            }
+        
+        # Extract intent from metadata if available (from cloud_deployments CSV)
+        raw = match_meta.get('raw', {})
+        detected_intent = raw.get('intent', 'provision') if isinstance(raw, dict) else 'provision'
+        
+        # Build recommendation based on exact knowledge base match
+        recommendation_parts = []
+        recommendation_parts.append(f"Based on knowledge base match (score: {match_score:.2f}):")
+        recommendation_parts.append(f"Matched pattern: {match_doc[:200]}...")
+        
+        # Include specific provisioning guidance from knowledge files
+        if detected_intent == 'provision':
+            recommendation_parts.append("\nProvisioning steps:")
+            recommendation_parts.append("1. Validate all required fields are present in the payload")
+            recommendation_parts.append("2. Check compliance and security requirements per knowledge base")
+            recommendation_parts.append("3. Apply deployment best practices from cloud_operations_provisionning_knowledge files")
+            recommendation_parts.append("4. Ensure payload structure matches Golang provisioner API expectations")
         
         recommendation = "\n".join(recommendation_parts)
         
         return {
             'recommendation': recommendation,
-            'confidence': 0.8,
+            'confidence': match_score,
             'metadata': {
-                'intent': intent,
-                'reasoning_steps': len(recommendation_parts)
+                'intent': detected_intent,
+                'reasoning_steps': len(recommendation_parts),
+                'matched': True,
+                'match_score': match_score,
+                'match_document': match_doc[:500]
             }
         }
     

@@ -16,10 +16,15 @@ and query-to-document match scoring. Tests exercise:
     4. Provisioning query classification accuracy
     5. Cross-query semantic discrimination
 
+IMPORTANT: Tests do NOT guess intent or make assumptions.
+All intent detection must come from exact matches in the knowledge base
+(cloud_operations_provisionning_knowledge1.txt, knowledge2.txt, db.csv).
+
 The scoring pipeline:
     1. Cosine similarity via sentence-transformer embeddings
     2. FAISS nearest-neighbor search
     3. Match percentage computation
+    4. Intent extraction from matched knowledge base documents only
 
 PREREQUISITES
 =============
@@ -572,7 +577,11 @@ class TestMatchScoring:
                        "; ".join(details) if details else f"diag={diag_avg:.1f}%, gap={separation:+.1f}%")
 
     def test_provision_vs_non_provision_discrimination(self, vector_store):
-        """Verify provisioning queries cluster together and away from non-provisioning."""
+        """
+        Verify provisioning queries cluster together and away from non-provisioning.
+        Tests should NOT guess intent - only verify that embeddings can distinguish
+        between provisioning and non-provisioning queries.
+        """
         model = getattr(vector_store, "model", None)
         if model is None:
             _record_score("Provision vs Non-Provision", 2, "model not loaded")
@@ -601,6 +610,7 @@ class TestMatchScoring:
         print(f"  Intra-provisioning avg similarity: {intra_avg:.4f}")
         print(f"  Cross-domain avg similarity:       {cross_avg:.4f}")
         print(f"  Discrimination gap:                {gap:+.4f}")
+        print(f"  NOTE: Tests do NOT guess intent - only verify embedding discrimination")
 
         score = 3
         details = []
