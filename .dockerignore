@@ -43,9 +43,9 @@ virtualenv/
 logs/
 *.log.*
 
-# Data files (mounted as volumes, not needed in image)
-# app/data/
-# *.csv
+# Data files (datasets, models, vectorstore — mounted as volumes, not in image)
+app/data/
+*.csv
 *.pdf
 *.pkl
 *.bin
@@ -117,12 +117,10 @@ Desktop.ini
 *.ipynb
 .ipynb_checkpoints/
 
-# Model files (if large, mount as volume instead)
-# Uncomment if models are too large for image
-# app/data/model/
-# *.pt
-# *.pth
-# *.safetensors
+# Model files (already covered by app/data/ above, but explicit for safety)
+*.pt
+*.pth
+*.safetensors
 
 # Cache directories
 .cache/

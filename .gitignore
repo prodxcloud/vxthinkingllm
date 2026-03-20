@@ -9,8 +9,8 @@ env/
 ENV/
 .venv
 
-# Data and indexes
-# data/
+# Data and indexes (datasets, models, vectorstore — large/generated files)
+app/data/
 *.pkl
 *.bin
 *.index
@@ -28,6 +28,7 @@ ENV/
 # Logs
 *.log
 logs/
+/app/logs/
 
 # OS
 .DS_Store
@@ -35,9 +36,6 @@ Thumbs.db
 
 *.csv
 *.pdf
-*.pkl
-*.bin
-*.index
 *.pkl.gz
 *.pkl.bz2
 *.pkl.zip
@@ -45,9 +43,3 @@ Thumbs.db
 *.pkl.tar.gz
 *.pkl.tar.bz2
 *.pkl.tar.zip
-*.pkl.tar.tar
-# ./app/data/
-# app/data
-/app/logs/
-app/data/models/
-app/data/vectorstore/

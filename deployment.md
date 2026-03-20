@@ -1,6 +1,6 @@
 # VaLLM Deployment Guide
 
-This guide covers deployment options for VaLLM (Vector-based Local LLM) on Virtual Machines and Azure Kubernetes Service (AKS).
+This guide covers deployment options for VaLLM (Vector-based Local LLM) on Virtual Machines and Azure Kubernetes Service (AKS). ...
 
 ## Table of Contents
 
