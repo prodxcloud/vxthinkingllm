@@ -58,6 +58,16 @@ router_v2 = APIRouter()
 router_v3 = APIRouter()
 logger = logging.getLogger("vallm")
 
+# Import database utilities
+try:
+    from app.services.ai.ml.db_utils import save_session_to_db
+except ImportError:
+    try:
+        from .db_utils import save_session_to_db
+    except ImportError:
+        logger.warning("db_utils not available - database saving disabled")
+        save_session_to_db = None
+
 
 def _summarize_context(results: list, max_items: int = 3, preview_chars: int = 180) -> str:
     if not results:
@@ -199,6 +209,7 @@ class QueryRequest(BaseModel):
     top_k: Optional[int] = 5
     filter_type: Optional[str] = None
     include_reasoning: Optional[bool] = True
+    tenant_id: Optional[str] = None
 
 
 class DeveloperRequest(BaseModel):
@@ -540,8 +551,15 @@ async def query_endpoint(
     Query endpoint - General purpose query interface
     Similar to OpenAI/Anthropic chat completion
     """
+    start_time = time.perf_counter()
+    request_id = getattr(req.state, "request_id", "unknown")
+    response_data = None
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    tokens_used = None
+    
     try:
-        request_id = getattr(req.state, "request_id", "unknown")
         logger.info(
             "V1 query start | query='%s' top_k=%s filter_type=%s include_reasoning=%s",
             request.query,
@@ -554,6 +572,7 @@ async def query_endpoint(
         reasoning_engine = req.app.state.reasoning_engine
         
         if not vector_store or not reasoning_engine:
+            status_code = 503
             raise HTTPException(status_code=503, detail="Service not initialized")
         
         # Perform reasoning if requested
@@ -598,7 +617,7 @@ async def query_endpoint(
                 extra={"request_id": request_id},
             )
             
-            return {
+            response_data = {
                 "response": reasoning_result['final_answer'],
                 "reasoning": {
                     "intent": reasoning_result['intent'],
@@ -619,6 +638,27 @@ async def query_endpoint(
                     "reasoning_steps": len(reasoning_result['steps'])
                 }
             }
+            intent_detected = reasoning_result.get('intent')
+            confidence = reasoning_result.get('confidence')
+            tokens_used = len(request.query.split())
+            
+            # Save to database
+            if save_session_to_db:
+                response_time_ms = (time.perf_counter() - start_time) * 1000
+                await save_session_to_db(
+                    request=req,
+                    query_text=request.query,
+                    response_data=response_data,
+                    status_code=status_code,
+                    response_time_ms=response_time_ms,
+                    intent_detected=intent_detected,
+                    confidence=confidence,
+                    model_version="vallm-v1",
+                    tokens_used=tokens_used,
+                    tenant_id=getattr(request, "tenant_id", None)
+                )
+            
+            return response_data
         else:
             # Simple search without reasoning
             search_start = time.perf_counter()
@@ -653,7 +693,7 @@ async def query_endpoint(
                 
                 # Only return response if we have a strong match (score > 0.3)
                 if top_score < 0.3:
-                    return {
+                    response_data = {
                         "response": "No strong match found in knowledge base. Please provide more specific details about your provisioning request.",
                         "context": [
                             {
@@ -669,27 +709,50 @@ async def query_endpoint(
                         },
                         "warning": "Low confidence match - response may not be accurate"
                     }
+                    tokens_used = len(request.query.split())
+                    confidence = top_score
+                else:
+                    # Return exact match from knowledge base
+                    response_data = {
+                        "response": top_result.get('document', 'No content available'),
+                        "context": [
+                            {
+                                "document": r.get('document', ''),
+                                "type": r.get('metadata', {}).get('type', 'unknown') if isinstance(r.get('metadata'), dict) else 'unknown',
+                                "score": r.get('score', 0.0)
+                            }
+                            for r in search_results
+                        ],
+                        "model": "vallm-v1",
+                        "usage": {
+                            "tokens": len(request.query.split())
+                        },
+                        "confidence": top_score,
+                        "source": "knowledge_base"
+                    }
+                    tokens_used = len(request.query.split())
+                    confidence = top_score
                 
-                # Return exact match from knowledge base
-                return {
-                    "response": top_result.get('document', 'No content available'),
-                    "context": [
-                        {
-                            "document": r.get('document', ''),
-                            "type": r.get('metadata', {}).get('type', 'unknown') if isinstance(r.get('metadata'), dict) else 'unknown',
-                            "score": r.get('score', 0.0)
-                        }
-                        for r in search_results
-                    ],
-                    "model": "vallm-v1",
-                    "usage": {
-                        "tokens": len(request.query.split())
-                    },
-                    "confidence": top_score,
-                    "source": "knowledge_base"
-                }
+                # Save to database
+                if save_session_to_db:
+                    response_time_ms = (time.perf_counter() - start_time) * 1000
+                    await save_session_to_db(
+                        request=req,
+                        query_text=request.query,
+                        response_data=response_data,
+                        status_code=status_code,
+                        response_time_ms=response_time_ms,
+                        intent_detected=intent_detected,
+                        confidence=confidence,
+                        model_version="vallm-v1",
+                        tokens_used=tokens_used,
+                        tenant_id=getattr(request, "tenant_id", None)
+                    )
+                
+                return response_data
             else:
-                return {
+                # No results
+                response_data = {
                     "response": "No relevant information found in the knowledge base. Please check cloud_operations_provisionning_knowledge1.txt, knowledge2.txt, or db.csv for available patterns.",
                     "context": [],
                     "model": "vallm-v1",
@@ -698,15 +761,60 @@ async def query_endpoint(
                     },
                     "confidence": 0.0
                 }
+                tokens_used = len(request.query.split())
+                
+                # Save to database
+                if save_session_to_db:
+                    response_time_ms = (time.perf_counter() - start_time) * 1000
+                    await save_session_to_db(
+                        request=req,
+                        query_text=request.query,
+                        response_data=response_data,
+                        status_code=status_code,
+                        response_time_ms=response_time_ms,
+                        model_version="vallm-v1",
+                        tokens_used=tokens_used,
+                        tenant_id=getattr(request, "tenant_id", None)
+                    )
+                
+                return response_data
     
     except HTTPException as e:
+        status_code = e.status_code
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query if hasattr(request, 'query') else None,
+                response_data={"error": e.detail},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v1",
+                tenant_id=getattr(request, "tenant_id", None) if hasattr(request, 'tenant_id') else None
+            )
         raise e
     except Exception as e:
         import traceback
         request_id = getattr(req.state, "request_id", "unknown")
         tb_str = traceback.format_exc()
         logger.error(f"V1 query failed [request_id={request_id}]\n{tb_str}")
+        status_code = 500
         detail = f"Error processing query: {type(e).__name__}: {e or repr(e)}"
+        
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query if hasattr(request, 'query') else None,
+                response_data={"error": detail},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v1",
+                tenant_id=getattr(request, "tenant_id", None) if hasattr(request, 'tenant_id') else None
+            )
+        
         raise HTTPException(status_code=500, detail=detail)
 
 
@@ -719,11 +827,17 @@ async def developer_endpoint(
     Developer endpoint - For code generation and developer assistance
     Focuses on infrastructure as code, configurations, and automation
     """
+    start_time = time.perf_counter()
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    
     try:
         vector_store = req.app.state.vector_store
         reasoning_engine = req.app.state.reasoning_engine
         
         if not vector_store or not reasoning_engine:
+            status_code = 503
             raise HTTPException(status_code=503, detail="Service not initialized")
         
         # Perform reasoning with developer context
@@ -764,7 +878,7 @@ async def developer_endpoint(
             for i, result in enumerate(resource_results[:3], 1):
                 response_parts.append(f"\n{i}. {result['document']}")
         
-        return {
+        response_data = {
             "response": "\n".join(response_parts),
             "reasoning": {
                 "intent": reasoning_result['intent'],
@@ -792,8 +906,41 @@ async def developer_endpoint(
                 "reasoning_steps": len(reasoning_result['steps'])
             }
         }
+        
+        intent_detected = reasoning_result.get('intent')
+        confidence = reasoning_result.get('confidence')
+        tokens_used = len(request.query.split())
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                intent_detected=intent_detected,
+                confidence=confidence,
+                model_version="vallm-developer-v1",
+                tokens_used=tokens_used
+            )
+        
+        return response_data
     
     except Exception as e:
+        status_code = 500
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query if hasattr(request, 'query') else None,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-developer-v1"
+            )
         raise HTTPException(status_code=500, detail=f"Error processing developer query: {str(e)}")
 
 
@@ -806,11 +953,17 @@ async def terminal_endpoint(
     Terminal endpoint - For command-line operations and terminal assistance
     Focuses on operational commands, troubleshooting, and system management
     """
+    start_time = time.perf_counter()
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    
     try:
         vector_store = req.app.state.vector_store
         reasoning_engine = req.app.state.reasoning_engine
         
         if not vector_store or not reasoning_engine:
+            status_code = 503
             raise HTTPException(status_code=503, detail="Service not initialized")
         
         # Search for relevant incidents and troubleshooting info
@@ -855,7 +1008,7 @@ async def terminal_endpoint(
                 priority = rec_data.get('priority', 'medium')
                 response_parts.append(f"\n{i}. [{priority.upper()}] {rec_type}: {result['document'][:200]}...")
         
-        return {
+        response_data = {
             "response": "\n".join(response_parts),
             "command": request.command,
             "reasoning": {
@@ -885,8 +1038,41 @@ async def terminal_endpoint(
                 "reasoning_steps": len(reasoning_result['steps'])
             }
         }
+        
+        intent_detected = reasoning_result.get('intent')
+        confidence = reasoning_result.get('confidence')
+        tokens_used = len(request.command.split())
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.command,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                intent_detected=intent_detected,
+                confidence=confidence,
+                model_version="vallm-terminal-v1",
+                tokens_used=tokens_used
+            )
+        
+        return response_data
     
     except Exception as e:
+        status_code = 500
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.command if hasattr(request, 'command') else None,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-terminal-v1"
+            )
         raise HTTPException(status_code=500, detail=f"Error processing terminal command: {str(e)}")
 
 
@@ -901,8 +1087,14 @@ async def v3_query_endpoint(
     Analyzes incident patterns using local data with embeddings, sklearn IsolationForest,
     XGBoost residuals, and PyTorch query similarity.
     """
+    start_time = time.perf_counter()
+    request_id = getattr(req.state, "request_id", "unknown")
+    response_data = None
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    
     try:
-        request_id = getattr(req.state, "request_id", "unknown")
         logger.info(
             "V3 incident analysis start | query='%s' focus='%s'",
             request.query,
@@ -981,7 +1173,7 @@ async def v3_query_endpoint(
             reasoning_payload = None
             reasoning_ms = 0
 
-        return {
+        response_data = {
             "response": response_text,
             "query": request.query,
             "focus": request.focus,
@@ -999,12 +1191,48 @@ async def v3_query_endpoint(
                 "total_ms": round(local_ms + analysis_ms + reasoning_ms, 2)
             }
         }
+        
+        if reasoning_payload:
+            intent_detected = reasoning_payload.get("intent")
+            confidence = reasoning_payload.get("confidence")
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            tokens_used = len(request.query.split())
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                intent_detected=intent_detected,
+                confidence=confidence,
+                model_version="vallm-v3-enhanced",
+                tokens_used=tokens_used
+            )
+        
+        return response_data
 
     except Exception as e:
         import traceback
         request_id = getattr(req.state, "request_id", "unknown")
         tb_str = traceback.format_exc()
         logger.error(f"V3 query failed [request_id={request_id}]\n{tb_str}")
+        status_code = 500
+        
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query if hasattr(request, 'query') else None,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v3-enhanced"
+            )
+        
         raise HTTPException(status_code=500, detail=f"Error processing v3 query: {str(e)}")
 
 
@@ -1455,11 +1683,17 @@ async def query_v2(
     - Provides context-aware recommendations
     - Enhanced search with entity filtering
     """
+    start_time = time.perf_counter()
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    
     try:
         vector_store = req.app.state.vector_store
         reasoning_engine = req.app.state.reasoning_engine
 
         if not vector_store:
+            status_code = 503
             raise HTTPException(status_code=503, detail="Vector store not initialized")
 
         # Extract entities from query
@@ -1501,7 +1735,7 @@ async def query_v2(
         else:
             response_text = reasoning_result['final_answer'] if reasoning_result else "No matching recommendations found."
 
-        return {
+        response_data = {
             "query": request.query,
             "response": response_text,
             "entities": [e.dict() for e in entities],
@@ -1528,13 +1762,47 @@ async def query_v2(
             "model": "vallm-v2-nlp",
             "timestamp": datetime.utcnow().isoformat()
         }
+        
+        if reasoning_result:
+            intent_detected = reasoning_result.get('intent')
+            confidence = reasoning_result.get('confidence')
+        tokens_used = len(request.query.split())
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                intent_detected=intent_detected,
+                confidence=confidence,
+                model_version="vallm-v2-nlp",
+                tokens_used=tokens_used
+            )
+        
+        return response_data
 
     except Exception as e:
+        status_code = 500
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query if hasattr(request, 'query') else None,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v2-nlp"
+            )
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 
 @router_v2.post("/extract")
-async def extract_entities(request: EntityExtractionRequest):
+async def extract_entities(request: EntityExtractionRequest, req: Request):
     """
     Extract cloud/DevOps entities from text
 
@@ -1546,6 +1814,9 @@ async def extract_entities(request: EntityExtractionRequest):
     - Error types
     - IP addresses, ports, instance IDs
     """
+    start_time = time.perf_counter()
+    status_code = 200
+    
     try:
         entities = entity_extractor.extract_all(request.text)
 
@@ -1553,7 +1824,7 @@ async def extract_entities(request: EntityExtractionRequest):
         if request.entity_types:
             entities = [e for e in entities if e.category in request.entity_types]
 
-        return {
+        response_data = {
             "text_preview": request.text[:200] + "..." if len(request.text) > 200 else request.text,
             "entities": [e.dict() for e in entities],
             "summary": {
@@ -1567,8 +1838,35 @@ async def extract_entities(request: EntityExtractionRequest):
                 "pattern_matching": True
             }
         }
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.text[:500],  # Store first 500 chars as query
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v2-extract",
+                metadata={"total_entities": len(entities)}
+            )
+        
+        return response_data
 
     except Exception as e:
+        status_code = 500
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.text[:500] if hasattr(request, 'text') else None,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="vallm-v2-extract"
+            )
         raise HTTPException(status_code=500, detail=f"Error extracting entities: {str(e)}")
 
 

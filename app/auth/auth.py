@@ -163,7 +163,7 @@ async def get_caller_identity(
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
             return CallerIdentity(
-                tenant_id=str(tenant_record.id),
+                tenant_id=str(tenant_record.tenant_id),
                 tenant_name=tenant_record.tenant_name,
                 email=tenant_record.email,
                 api_key_environment=tenant_record.environment,

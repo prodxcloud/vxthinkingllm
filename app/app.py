@@ -84,13 +84,19 @@ DEPLOYMENT:
 
 import os
 import sys
+from pathlib import Path
+
+# Ensure project root is on path so "app" package resolves (e.g. when run as python app/app.py)
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 import json
 import logging
 import time
 import uuid
 import subprocess
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 
@@ -176,13 +182,23 @@ file_handler.setFormatter(file_formatter)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
+# Import database utilities (after logger is defined)
+try:
+    from app.services.ai.ml.db_utils import save_session_to_db
+except ImportError:
+    try:
+        from services.ai.ml.db_utils import save_session_to_db
+    except ImportError:
+        logger.warning("db_utils not available - database saving disabled")
+        save_session_to_db = None
+
 
 def log_request(request_id: str, method: str, path: str, client: str, body: dict = None):
     """Log incoming request"""
     log_entry = {
         "type": "REQUEST",
         "request_id": request_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "method": method,
         "path": path,
         "client_ip": client,
@@ -195,7 +211,7 @@ def log_request(request_id: str, method: str, path: str, client: str, body: dict
     # Detailed file log
     with open(LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(f"\n{'='*80}\n")
-        f.write(f"REQUEST | {datetime.utcnow().isoformat()}\n")
+        f.write(f"REQUEST | {datetime.now(timezone.utc).isoformat()}\n")
         f.write(f"{'='*80}\n")
         f.write(json.dumps(log_entry, indent=2))
         f.write("\n")
@@ -206,7 +222,7 @@ def log_response(request_id: str, status_code: int, duration_ms: float, response
     log_entry = {
         "type": "RESPONSE",
         "request_id": request_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "status_code": status_code,
         "duration_ms": round(duration_ms, 2),
         "response_preview": response_preview[:300] if response_preview else None
@@ -227,7 +243,7 @@ def log_response(request_id: str, status_code: int, duration_ms: float, response
     
     # Detailed file log
     with open(LOG_FILE, 'a', encoding='utf-8') as f:
-        f.write(f"\nRESPONSE | {datetime.utcnow().isoformat()}\n")
+        f.write(f"\nRESPONSE | {datetime.now(timezone.utc).isoformat()}\n")
         f.write(f"{'-'*40}\n")
         f.write(json.dumps(log_entry, indent=2))
         f.write(f"\n{'='*80}\n\n")
@@ -1016,19 +1032,35 @@ class SearchResult(BaseModel):
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
+async def generate(request: GenerateRequest, req: Request):
     """Generate text using the trained LLM model"""
     global tokenizer, model
+    start_time = time.time()
     
     if tokenizer is None or model is None:
         fallback_msg = "Model not loaded. Please run 'python ./app/train.py' first to train and export the model."
         logger.warning("LLM input/output skipped (model not loaded)")
-        return GenerateResponse(
+        response_data = GenerateResponse(
             response=fallback_msg,
             text=fallback_msg,
             model_loaded=False,
             device="none"
         )
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.time() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.prompt,
+                response_data=response_data.model_dump(),
+                status_code=200,
+                response_time_ms=response_time_ms,
+                model_version="local-llm",
+                metadata={"error": "Model not loaded"}
+            )
+        
+        return response_data
     
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -1048,24 +1080,54 @@ async def generate(request: GenerateRequest):
         generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
         logger.info(f"LLM output: {generated_text}")
         
-        return GenerateResponse(
+        response_data = GenerateResponse(
             response=generated_text,
             text=generated_text,  # For LangChain compatibility
             model_loaded=True,
             device=device
         )
+        
+        # Save to database
+        if save_session_to_db and req:
+            response_time_ms = (time.time() - start_time) * 1000
+            tokens_used = len(request.prompt.split()) + len(generated_text.split())
+            await save_session_to_db(
+                request=req,
+                query_text=request.prompt,
+                response_data=response_data.model_dump(),
+                status_code=200,
+                response_time_ms=response_time_ms,
+                model_version="local-llm",
+                tokens_used=tokens_used
+            )
+        
+        return response_data
     except Exception as e:
         error_msg = f"Error generating response: {str(e)}"
-        return GenerateResponse(
+        response_data = GenerateResponse(
             response=error_msg,
             text=error_msg,
             model_loaded=True,
             device="error"
         )
+        
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.time() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.prompt,
+                response_data={"error": error_msg},
+                status_code=500,
+                response_time_ms=response_time_ms,
+                model_version="local-llm"
+            )
+        
+        return response_data
 
 
 @app.post("/search")
-async def search(request: SearchRequest):
+async def search(request: SearchRequest, req: Request):
     """
     Search the vector store for relevant documents.
     This endpoint is compatible with LangChain retrievers.
@@ -1074,8 +1136,19 @@ async def search(request: SearchRequest):
         {"results": [{"text": "...", "score": 0.12, "metadata": {...}}, ...]}
     """
     global vector_store
+    start_time = time.time()
     
     if vector_store is None:
+        status_code = 503
+        if save_session_to_db and req:
+            response_time_ms = (time.time() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data={"error": "Vector store not initialized"},
+                status_code=status_code,
+                response_time_ms=response_time_ms
+            )
         raise HTTPException(status_code=503, detail="Vector store not initialized")
     
     try:
@@ -1093,11 +1166,38 @@ async def search(request: SearchRequest):
                 "metadata": r.get("metadata", {})
             })
         
-        return {"results": results}
+        response_data = {"results": results}
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.time() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data=response_data,
+                status_code=200,
+                response_time_ms=response_time_ms,
+                model_version="vector-search"
+            )
+        
+        return response_data
     
     except Exception as e:
         import traceback
         logger.error(f"Search error: {traceback.format_exc()}")
+        status_code = 500
+        
+        # Save error to database
+        if save_session_to_db and req:
+            response_time_ms = (time.time() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=request.query,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms
+            )
+        
         raise HTTPException(status_code=500, detail=f"Search error: {type(e).__name__}: {str(e)}")
 
 

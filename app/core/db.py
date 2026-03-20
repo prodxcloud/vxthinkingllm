@@ -17,11 +17,11 @@ def load_env():
 
 load_env()
 
-# Single source of truth for PostgreSQL connection (database: vacloudopsdb1)
+# Single source of truth for PostgreSQL connection (database: va_llm_v1)
 def get_db_config():
     """Return dict with keys: database, user, password, host, port. Used by settings and platform database."""
     return {
-        "database": os.environ.get("POSTGRES_DB", "vacloudopsdb1"),
+        "database": os.environ.get("POSTGRES_DB", "va_llm_v1"),
         "user": os.environ.get("POSTGRES_USER", "postgres"),
         "password": os.environ.get("POSTGRES_PASSWORD", "postgres"),
         "host": os.environ.get("POSTGRES_HOST", "127.0.0.1"),

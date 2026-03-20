@@ -9,19 +9,19 @@ Two tables only:
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Boolean, DateTime, Text,
-    Float, func,
+    Float, func, ForeignKey,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
-from app.orm.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.orm.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, TenantPrimaryKeyMixin
 
 
 # ---------------------------------------------------------------------------
 # 1. Tenant
 # ---------------------------------------------------------------------------
 
-class Tenant(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class Tenant(Base, TenantPrimaryKeyMixin, TimestampMixin):
     """
     Tenant registry with built-in API key authentication.
     Tracks where VaLLM is deployed, who the sub-tenants are,
@@ -75,7 +75,7 @@ class Tenant(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         return self.is_active and not self.is_expired
 
     def __repr__(self) -> str:
-        return f"<Tenant(id={self.id}, tenant_name={self.tenant_name!r}, active={self.is_active})>"
+        return f"<Tenant(tenant_id={self.tenant_id}, tenant_name={self.tenant_name!r}, active={self.is_active})>"
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ class Session(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "sessions"
 
     # --- Tenant FK ---
-    tenant_id = Column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    tenant_id = Column(PG_UUID(as_uuid=True), ForeignKey("tenants.tenant_id"), nullable=True, index=True)
 
     # --- Request details ---
     request_path = Column(String(500), nullable=True)
@@ -120,8 +120,7 @@ class Session(Base, UUIDPrimaryKeyMixin):
     metadata_ = Column("metadata", JSONB, nullable=True)
 
     # --- Relationships ---
-    tenant = relationship("Tenant", back_populates="sessions", foreign_keys=[tenant_id],
-                          primaryjoin="Session.tenant_id == Tenant.id")
+    tenant = relationship("Tenant", back_populates="sessions")
 
     def __repr__(self) -> str:
         return f"<Session(id={self.id}, tenant_id={self.tenant_id}, path={self.request_path!r})>"

@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     trusted_hosts: List[str] = ["*"]
     
     # Database Configuration
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/Cloud"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/va_llm_v1"
     database_echo: bool = False
     database_pool_size: int = 20
     database_max_overflow: int = 30

@@ -26,5 +26,10 @@ class TimestampMixin:
 
 
 class UUIDPrimaryKeyMixin:
-    """UUID primary key."""
+    """UUID primary key (generic 'id')."""
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+
+class TenantPrimaryKeyMixin:
+    """UUID primary key named tenant_id (for Tenant table, to match Session.tenant_id)."""
+    tenant_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

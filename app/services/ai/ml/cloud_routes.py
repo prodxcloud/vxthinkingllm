@@ -14,6 +14,16 @@ from pydantic import BaseModel
 
 from .entity_extraction import extract_entities_from_query
 
+# Import database utilities
+try:
+    from app.services.ai.ml.db_utils import save_session_to_db
+except ImportError:
+    try:
+        from .db_utils import save_session_to_db
+    except ImportError:
+        logger.warning("db_utils not available - database saving disabled")
+        save_session_to_db = None
+
 router = APIRouter(prefix="/api/cloud", tags=["cloud"])
 logger = logging.getLogger("vallm.cloud")
 
@@ -318,19 +328,40 @@ async def provision_intent(
     Resolve user message to provisioning intent + Golang-ready payload.
     When no deployment match: returns query_type "other". Provisioning-only.
     """
+    start_time = time.perf_counter()
+    status_code = 200
+    intent_detected = None
+    confidence = None
+    
     vector_store = getattr(req.app.state, "vector_store", None)
     if not vector_store:
+        status_code = 503
         raise HTTPException(status_code=503, detail="Vector store not initialized")
 
     query = (request.query or "").strip()
     if not query:
-        return {
+        response_data = {
             "query_type": "other",
             "intent": None,
             "payload": None,
             "confidence": 0.0,
             "match_prompt": None,
         }
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text="",
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="cloud-provision-intent",
+                metadata={"query_type": "other", "empty_query": True}
+            )
+        
+        return response_data
 
     # Search; prefer deployment-type results if precompute tags them (filter_type="deployment")
     try:
@@ -341,6 +372,18 @@ async def provision_intent(
         )
     except Exception as e:
         logger.exception("provision-intent search failed")
+        status_code = 500
+        # Save error to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=query,
+                response_data={"error": str(e)},
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="cloud-provision-intent"
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
     # Keep only rows from cloud_deployments (raw has "intent")
@@ -351,13 +394,28 @@ async def provision_intent(
 
     if not deployment_results:
         query_type = _classify_non_provisioning(query)
-        return {
+        response_data = {
             "query_type": query_type,
             "intent": None,
             "payload": None,
             "confidence": 0.0,
             "match_prompt": None,
         }
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=query,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                model_version="cloud-provision-intent",
+                metadata={"query_type": query_type}
+            )
+        
+        return response_data
 
     best = deployment_results[0]
     meta = best.get("metadata") or {}
@@ -370,13 +428,29 @@ async def provision_intent(
     confidence = float(score)
     if confidence < 0.3:
         query_type = _classify_non_provisioning(query)
-        return {
+        response_data = {
             "query_type": query_type,
             "intent": None,
             "payload": None,
             "confidence": confidence,
             "match_prompt": match_prompt,
         }
+        
+        # Save to database
+        if save_session_to_db:
+            response_time_ms = (time.perf_counter() - start_time) * 1000
+            await save_session_to_db(
+                request=req,
+                query_text=query,
+                response_data=response_data,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+                confidence=confidence,
+                model_version="cloud-provision-intent",
+                metadata={"query_type": query_type}
+            )
+        
+        return response_data
 
     # Build complete payload following knowledge files structure
     payload = _raw_to_golang_payload(raw, intent)
@@ -390,7 +464,7 @@ async def provision_intent(
     # Ensure all required fields are present based on intent and knowledge files
     payload = _ensure_complete_payload(payload, intent, raw)
     
-    return {
+    response_data = {
         "query_type": "provisioning",
         "intent": intent,
         "payload": payload,
@@ -398,6 +472,27 @@ async def provision_intent(
         "match_prompt": match_prompt,
         "metadata": {
             "source": "knowledge_base",
-            "matched_document": best.get("document", "")[:200] if best.get("document") else None
+            "matched_document": best.get("document", "")[:200] if best.get("document") else None,
+            "search_score": score,
+            "deployment_matches": len(deployment_results),
         }
     }
+    
+    intent_detected = intent
+    
+    # Save to database
+    if save_session_to_db:
+        response_time_ms = (time.perf_counter() - start_time) * 1000
+        await save_session_to_db(
+            request=req,
+            query_text=query,
+            response_data=response_data,
+            status_code=status_code,
+            response_time_ms=response_time_ms,
+            intent_detected=intent_detected,
+            confidence=confidence,
+            model_version="cloud-provision-intent",
+            metadata={"query_type": "provisioning", "intent": intent}
+        )
+    
+    return response_data
