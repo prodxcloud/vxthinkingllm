@@ -44,19 +44,101 @@ class EntityExtractor:
             r'\b(?:user|username)\s+([a-zA-Z][a-zA-Z0-9_]*)\b'
         ]
         
-        # Instance type patterns
+        # Instance type patterns - ordered by specificity (most specific first)
         self.instance_type_patterns = [
-            r'\b(t[2-4]\.[a-z0-9]+)\b',
-            r'\b(m[4-6]\.[a-z0-9]+)\b',
-            r'\b(c[4-6]\.[a-z0-9]+)\b',
-            r'\b(r[4-6]\.[a-z0-9]+)\b'
+            # RDS/managed DB instance classes FIRST (db.t3.medium, db.r5.large) - before AWS patterns
+            r'\b(db\.[a-z][0-9][a-z]?\.[a-z0-9]+)\b',
+            # GCP instance types (n2-standard-4, e2-medium, c2-standard-8, e2-micro, etc.)
+            r'\b((?:n[12]|e2|c2|a2|g2|m[12])-(?:standard|highmem|highcpu|micro|small|medium)(?:-\d+)?)\b',
+            # Azure instance types (Standard_B2s, Standard_D4s_v3)
+            r'\b(Standard_[A-Z][a-zA-Z0-9_]+(?:_v\d+)?)\b',
+            # AWS instance types (t2-t4g, m4-m7i, c4-c7g, r4-r7i, p3, g4, i3, d2)
+            r'\b(t[2-4]g?\.[a-z0-9]+)\b',
+            r'\b(m[4-7][a-z]?\.[a-z0-9]+)\b',
+            r'\b(c[4-7][a-z]?\.[a-z0-9]+)\b',
+            r'\b(r[4-7][a-z]?\.[a-z0-9]+)\b',
+            r'\b(p[2-5][a-z]?\.[a-z0-9]+)\b',
+            r'\b(g[4-5][a-z]?\.[a-z0-9]+)\b',
+            r'\b(i[3-4][a-z]?\.[a-z0-9]+)\b',
+            r'\b(d[2-3][a-z]?\.[a-z0-9]+)\b',
         ]
-        
-        # Region patterns
+
+        # Region patterns - all major cloud regions
         self.region_patterns = [
             r'\b(us-(?:east|west)-[12])\b',
-            r'\b(eu-(?:central|west)-[12])\b',
-            r'\b(ap-(?:southeast|northeast)-[12])\b'
+            r'\b(us-east-2)\b',
+            r'\b(eu-(?:central|west|north|south)-[1-3])\b',
+            r'\b(ap-(?:southeast|northeast|south|east)-[1-3])\b',
+            r'\b(ca-central-1)\b',
+            r'\b(sa-east-1)\b',
+            r'\b(me-(?:south|central)-1)\b',
+            r'\b(af-south-1)\b',
+            # GCP regions
+            r'\b((?:us|europe|asia|australia|southamerica|northamerica)-(?:central|east|west|north|south|southeast|northeast)\d?)\b',
+            # Azure regions
+            r'\b((?:east|west|central|north|south)(?:us|europe|asia|india|japan|australia|uk|canada|brazil|korea|france|germany|norway|switzerland|uae|southafrica)(?:\d)?)\b',
+        ]
+
+        # Cloud provider detection patterns
+        self.cloud_provider_patterns = [
+            (r'\b(?:aws|amazon\s*web\s*services|ec2|s3|lambda|eks|rds|cloudfront)\b', 'aws'),
+            (r'\b(?:gcp|google\s*cloud|gke|gce|cloud\s*run|bigquery|compute\s*engine)\b', 'gcp'),
+            (r'\b(?:azure|microsoft\s*azure|aks|azure\s*vm|azure\s*sql)\b', 'azure'),
+            (r'\b(?:digitalocean|droplet|doks)\b', 'digitalocean'),
+            (r'\b(?:valtunox)\b', 'valtunox'),
+        ]
+
+        # Database engine detection patterns
+        self.db_engine_patterns = [
+            (r'\b(?:postgresql|postgres|pg)\b', 'postgresql'),
+            (r'\b(?:mysql)\b', 'mysql'),
+            (r'\b(?:mariadb)\b', 'mariadb'),
+            (r'\b(?:mongodb|mongo)\b', 'mongodb'),
+            (r'\b(?:aurora[- ]postgresql|aurora[- ]postgres)\b', 'aurora-postgresql'),
+            (r'\b(?:aurora[- ]mysql|aurora)\b', 'aurora-mysql'),
+            (r'\b(?:redis)\b', 'redis'),
+            (r'\b(?:mssql|sql\s*server)\b', 'mssql'),
+        ]
+
+        # Monitoring tool detection
+        self.monitoring_tool_patterns = [
+            (r'\b(?:prometheus)\b', 'prometheus'),
+            (r'\b(?:grafana)\b', 'grafana'),
+            (r'\b(?:zabbix)\b', 'zabbix'),
+            (r'\b(?:datadog)\b', 'datadog'),
+            (r'\b(?:nagios)\b', 'nagios'),
+            (r'\b(?:new\s*relic)\b', 'newrelic'),
+        ]
+
+        # CICD tool detection
+        self.cicd_tool_patterns = [
+            (r'\b(?:jenkins)\b', 'jenkins'),
+            (r'\b(?:argocd|argo\s*cd)\b', 'argocd'),
+            (r'\b(?:github[- ]actions[- ]runner|github[- ]runner)\b', 'github-actions-runner'),
+            (r'\b(?:gitlab[- ]runner)\b', 'gitlab-runner'),
+            (r'\b(?:tekton)\b', 'tekton'),
+            (r'\b(?:drone)\b', 'drone'),
+        ]
+
+        # VPN protocol detection
+        self.vpn_protocol_patterns = [
+            (r'\b(?:wireguard)\b', 'wireguard'),
+            (r'\b(?:openvpn)\b', 'openvpn'),
+            (r'\b(?:ipsec)\b', 'ipsec'),
+        ]
+
+        # OS detection patterns
+        self.os_patterns = [
+            (r'\b(?:ubuntu[- ]?24\.04)\b', 'ubuntu-24.04'),
+            (r'\b(?:ubuntu[- ]?22\.04)\b', 'ubuntu-22.04'),
+            (r'\b(?:ubuntu)\b', 'ubuntu'),
+            (r'\b(?:debian[- ]?12)\b', 'debian-12'),
+            (r'\b(?:debian)\b', 'debian-12'),
+            (r'\b(?:centos[- ]?stream[- ]?9)\b', 'centos-stream-9'),
+            (r'\b(?:centos)\b', 'centos'),
+            (r'\b(?:amazon[- ]linux[- ]2)\b', 'amazon-linux-2'),
+            (r'\b(?:windows[- ]server[- ]2022)\b', 'windows-server-2022'),
+            (r'\b(?:windows)\b', 'windows-server-2022'),
         ]
         
         # Port patterns
@@ -159,13 +241,43 @@ class EntityExtractor:
         if storage:
             entities['volume_size_gb'] = str(storage)
             
+        # Extract cloud provider
+        cloud_provider = self._extract_pattern_match(query, self.cloud_provider_patterns)
+        if cloud_provider:
+            entities['cloud_provider'] = cloud_provider
+
+        # Extract database engine
+        db_engine = self._extract_pattern_match(query, self.db_engine_patterns)
+        if db_engine:
+            entities['database_engine'] = db_engine
+
+        # Extract monitoring tool
+        mon_tool = self._extract_pattern_match(query, self.monitoring_tool_patterns)
+        if mon_tool:
+            entities['monitoring_tool'] = mon_tool
+
+        # Extract CICD tool
+        cicd_tool = self._extract_pattern_match(query, self.cicd_tool_patterns)
+        if cicd_tool:
+            entities['cicd_tool'] = cicd_tool
+
+        # Extract VPN protocol
+        vpn_proto = self._extract_pattern_match(query, self.vpn_protocol_patterns)
+        if vpn_proto:
+            entities['vpn_protocol'] = vpn_proto
+
+        # Extract OS
+        os_name = self._extract_pattern_match(query, self.os_patterns)
+        if os_name:
+            entities['os'] = os_name
+
         # Extract numbers for node count, etc.
         numbers = self._extract_numbers(query)
         if numbers:
             # Assign numbers based on context
             if 'node' in query_lower and numbers:
                 entities['node_count'] = str(numbers[0])
-                
+
         logger.info(f"Extracted entities: {entities}")
         return entities
 
@@ -286,6 +398,13 @@ class EntityExtractor:
             except ValueError:
                 continue
         return numbers
+
+    def _extract_pattern_match(self, query: str, patterns: list) -> Optional[str]:
+        """Extract first match from a list of (pattern, value) tuples."""
+        for pattern, value in patterns:
+            if re.search(pattern, query, re.IGNORECASE):
+                return value
+        return None
 
     def _is_valid_hostname(self, hostname: str) -> bool:
         """Validate hostname format."""

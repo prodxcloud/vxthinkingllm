@@ -178,6 +178,138 @@ def _raw_to_golang_payload(raw: Dict[str, Any], intent: str) -> Dict[str, Any]:
         payload["steps"] = v("steps")
         payload["export_format"] = v("export_format", "terraform")
 
+    # ---- Intents present in training data (cloud_deployments.csv) ----
+
+    elif intent == "provision_nextjs":
+        payload["hostname"] = v("hostname")
+        payload["app_name"] = v("app_name")
+        payload["app_port"] = vi("app_port", 3000)
+        payload["http_port"] = vi("http_port", 80)
+        payload["framework"] = "nextjs"
+        payload["node_version"] = v("runtime_version", "18")
+        payload["repo_url"] = v("repo_url")
+        payload["server_name"] = v("server_name") or v("hostname")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_django":
+        payload["hostname"] = v("hostname")
+        payload["app_name"] = v("app_name")
+        payload["app_port"] = vi("app_port", 8000)
+        payload["http_port"] = vi("http_port", 80)
+        payload["framework"] = "django"
+        payload["python_version"] = v("runtime_version", "3.12")
+        payload["database_engine"] = v("database_engine", "postgres")
+        payload["repo_url"] = v("repo_url")
+        payload["server_name"] = v("server_name") or v("hostname")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_reactjs":
+        payload["hostname"] = v("hostname")
+        payload["app_name"] = v("app_name")
+        payload["app_port"] = vi("app_port", 8080)
+        payload["http_port"] = vi("http_port", 80)
+        payload["framework"] = "react"
+        payload["node_version"] = v("runtime_version", "22")
+        payload["repo_url"] = v("repo_url")
+        payload["server_name"] = v("server_name") or v("hostname")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_monitoring":
+        payload["hostname"] = v("hostname")
+        payload["monitoring_tool"] = v("monitoring_tool", "prometheus")
+        payload["monitoring_port"] = vi("monitoring_port", 9090)
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_elk":
+        payload["hostname"] = v("hostname")
+        payload["elk_version"] = v("elk_version", "8.12.0")
+        payload["es_port"] = vi("es_port", 9200)
+        payload["kibana_port"] = vi("kibana_port", 5601)
+        payload["logstash_port"] = vi("logstash_port", 5044)
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_vpn":
+        payload["hostname"] = v("hostname")
+        payload["vpn_protocol"] = v("vpn_protocol", "wireguard")
+        payload["vpn_port"] = vi("vpn_port", 51820)
+        payload["vpn_clients"] = vi("vpn_clients", 10)
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_cicd":
+        payload["hostname"] = v("hostname")
+        payload["cicd_tool"] = v("cicd_tool", "jenkins")
+        payload["cicd_port"] = vi("cicd_port", 8080)
+        payload["docker_image"] = v("docker_image")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_managed_database":
+        payload["database_engine"] = v("database_engine") or v("db_engine")
+        payload["database_name"] = v("database_name")
+        payload["database_user"] = v("database_user", "admin")
+        payload["db_instance_class"] = v("db_instance_class", "db.t3.medium")
+        payload["storage_size_gb"] = vi("storage_size_gb", 100)
+        payload["multi_az"] = v("multi_az", "false")
+        payload["region"] = v("region", "us-east-1")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+
+    elif intent == "provision_cache":
+        payload["hostname"] = v("hostname")
+        payload["cache_engine"] = v("cache_engine", "redis")
+        payload["cache_port"] = vi("cache_port", 6379)
+        payload["cache_size_mb"] = vi("cache_size_mb", 512)
+        payload["replicas"] = vi("replicas", 1)
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_storage":
+        payload["storage_backend"] = v("storage_backend", "s3")
+        payload["bucket_name"] = v("bucket_name")
+        payload["region"] = v("region", "us-east-1")
+        payload["cloud_provider"] = v("cloud_provider", "aws")
+        payload["storage_size_gb"] = vi("storage_size_gb", 100)
+
+    elif intent == "provision_ssl":
+        payload["hostname"] = v("hostname")
+        payload["domain_name"] = v("domain_name") or v("hostname")
+        payload["ssl_provider"] = v("ssl_provider", "letsencrypt")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_loadbalancer":
+        payload["hostname"] = v("hostname")
+        payload["lb_type"] = v("lb_type", "nginx")
+        payload["lb_algorithm"] = v("lb_algorithm", "round-robin")
+        payload["http_port"] = vi("http_port", 80)
+        payload["https_port"] = vi("https_port", 443)
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_wordpress":
+        payload["hostname"] = v("hostname")
+        payload["app_name"] = v("app_name", "wordpress")
+        payload["http_port"] = vi("http_port", 80)
+        payload["database_engine"] = v("database_engine", "mysql")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
+    elif intent == "provision_springboot":
+        payload["hostname"] = v("hostname")
+        payload["app_name"] = v("app_name")
+        payload["app_port"] = vi("app_port", 8080)
+        payload["http_port"] = vi("http_port", 80)
+        payload["framework"] = "springboot"
+        payload["java_version"] = v("runtime_version", "17")
+        payload["repo_url"] = v("repo_url")
+        payload["ssh_username"] = v("ssh_username", "ubuntu")
+        payload["key_pair_name"] = v("key_pair_name")
+
     # Common optional fields
     for key in ("region", "cloud_provider", "hostname", "ssh_username", "key_pair_name"):
         if key not in payload and v(key):
@@ -301,7 +433,6 @@ def _ensure_complete_payload(payload: Dict[str, Any], intent: str, raw: Dict[str
         if "database_user" not in payload or not payload["database_user"]:
             payload["database_user"] = v("database_user", "admin")
         if "port" not in payload:
-            # Default ports based on engine
             engine = payload.get("database_engine", "").lower()
             if "postgres" in engine:
                 payload["port"] = int(v("port", "5432"))
@@ -315,7 +446,143 @@ def _ensure_complete_payload(payload: Dict[str, Any], intent: str, raw: Dict[str
             payload["ssh_username"] = v("ssh_username", "ubuntu")
         if "key_pair_name" not in payload or not payload["key_pair_name"]:
             payload["key_pair_name"] = v("key_pair_name", "")
-    
+
+    elif intent == "provision_nextjs":
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name") or f"nextjs-app-{int(time.time())}"
+        if "app_port" not in payload:
+            payload["app_port"] = int(v("app_port", "3000"))
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "node_version" not in payload or not payload["node_version"]:
+            payload["node_version"] = v("runtime_version", "18")
+
+    elif intent == "provision_django":
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name") or f"django-app-{int(time.time())}"
+        if "app_port" not in payload:
+            payload["app_port"] = int(v("app_port", "8000"))
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "python_version" not in payload or not payload["python_version"]:
+            payload["python_version"] = v("runtime_version", "3.12")
+        if "database_engine" not in payload or not payload["database_engine"]:
+            payload["database_engine"] = v("database_engine", "postgres")
+
+    elif intent == "provision_reactjs":
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name") or f"react-app-{int(time.time())}"
+        if "app_port" not in payload:
+            payload["app_port"] = int(v("app_port", "8080"))
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "node_version" not in payload or not payload["node_version"]:
+            payload["node_version"] = v("runtime_version", "22")
+
+    elif intent == "provision_monitoring":
+        if "monitoring_tool" not in payload or not payload["monitoring_tool"]:
+            payload["monitoring_tool"] = v("monitoring_tool", "prometheus")
+        if "monitoring_port" not in payload:
+            tool = payload.get("monitoring_tool", "").lower()
+            if "grafana" in tool:
+                payload["monitoring_port"] = int(v("monitoring_port", "3000"))
+            elif "zabbix" in tool:
+                payload["monitoring_port"] = int(v("monitoring_port", "10051"))
+            elif "datadog" in tool:
+                payload["monitoring_port"] = int(v("monitoring_port", "8126"))
+            else:
+                payload["monitoring_port"] = int(v("monitoring_port", "9090"))
+
+    elif intent == "provision_elk":
+        if "elk_version" not in payload or not payload["elk_version"]:
+            payload["elk_version"] = v("elk_version", "8.12.0")
+        if "es_port" not in payload:
+            payload["es_port"] = int(v("es_port", "9200"))
+        if "kibana_port" not in payload:
+            payload["kibana_port"] = int(v("kibana_port", "5601"))
+        if "logstash_port" not in payload:
+            payload["logstash_port"] = int(v("logstash_port", "5044"))
+
+    elif intent == "provision_vpn":
+        if "vpn_protocol" not in payload or not payload["vpn_protocol"]:
+            payload["vpn_protocol"] = v("vpn_protocol", "wireguard")
+        if "vpn_port" not in payload:
+            proto = payload.get("vpn_protocol", "").lower()
+            if "openvpn" in proto:
+                payload["vpn_port"] = int(v("vpn_port", "1194"))
+            else:
+                payload["vpn_port"] = int(v("vpn_port", "51820"))
+        if "vpn_clients" not in payload:
+            payload["vpn_clients"] = int(v("vpn_clients", "10"))
+
+    elif intent == "provision_cicd":
+        if "cicd_tool" not in payload or not payload["cicd_tool"]:
+            payload["cicd_tool"] = v("cicd_tool", "jenkins")
+        if "cicd_port" not in payload:
+            payload["cicd_port"] = int(v("cicd_port", "8080"))
+
+    elif intent == "provision_managed_database":
+        if "database_engine" not in payload or not payload["database_engine"]:
+            payload["database_engine"] = v("database_engine") or v("db_engine") or "aurora-postgresql"
+        if "database_name" not in payload or not payload["database_name"]:
+            payload["database_name"] = v("database_name") or f"managed-db-{int(time.time())}"
+        if "db_instance_class" not in payload or not payload["db_instance_class"]:
+            payload["db_instance_class"] = v("db_instance_class", "db.t3.medium")
+        if "storage_size_gb" not in payload:
+            payload["storage_size_gb"] = int(v("storage_size_gb", "100"))
+
+    elif intent == "provision_cache":
+        if "cache_engine" not in payload or not payload["cache_engine"]:
+            payload["cache_engine"] = v("cache_engine", "redis")
+        if "cache_port" not in payload:
+            engine = payload.get("cache_engine", "").lower()
+            if "memcached" in engine:
+                payload["cache_port"] = int(v("cache_port", "11211"))
+            elif "sentinel" in engine:
+                payload["cache_port"] = int(v("cache_port", "26379"))
+            else:
+                payload["cache_port"] = int(v("cache_port", "6379"))
+        if "cache_size_mb" not in payload:
+            payload["cache_size_mb"] = int(v("cache_size_mb", "512"))
+
+    elif intent == "provision_storage":
+        if "storage_backend" not in payload or not payload["storage_backend"]:
+            payload["storage_backend"] = v("storage_backend", "s3")
+        if "bucket_name" not in payload or not payload["bucket_name"]:
+            payload["bucket_name"] = v("bucket_name") or f"bucket-{int(time.time())}"
+        if "storage_size_gb" not in payload:
+            payload["storage_size_gb"] = int(v("storage_size_gb", "100"))
+
+    elif intent == "provision_ssl":
+        if "domain_name" not in payload or not payload["domain_name"]:
+            payload["domain_name"] = v("domain_name") or v("hostname")
+        if "ssl_provider" not in payload or not payload["ssl_provider"]:
+            payload["ssl_provider"] = v("ssl_provider", "letsencrypt")
+
+    elif intent == "provision_loadbalancer":
+        if "lb_type" not in payload or not payload["lb_type"]:
+            payload["lb_type"] = v("lb_type", "nginx")
+        if "lb_algorithm" not in payload or not payload["lb_algorithm"]:
+            payload["lb_algorithm"] = v("lb_algorithm", "round-robin")
+
+    elif intent == "provision_wordpress":
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name", "wordpress")
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "database_engine" not in payload or not payload["database_engine"]:
+            payload["database_engine"] = v("database_engine", "mysql")
+
+    elif intent == "provision_springboot":
+        if "app_name" not in payload or not payload["app_name"]:
+            payload["app_name"] = v("app_name") or f"springboot-app-{int(time.time())}"
+        if "app_port" not in payload:
+            payload["app_port"] = int(v("app_port", "8080"))
+        if "http_port" not in payload:
+            payload["http_port"] = int(v("http_port", "80"))
+        if "java_version" not in payload or not payload["java_version"]:
+            payload["java_version"] = v("runtime_version", "17")
+
     return payload
 
 

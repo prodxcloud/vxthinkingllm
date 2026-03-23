@@ -143,8 +143,40 @@ class TrainConfig:
 def row_to_text(row: Dict) -> str:
     """Convert one CSV row into a single training text.
 
-    For deployment/provisioning JSON, a compact key/value representation works well.
+    Uses instruction-tuning format with explicit prompt/completion pairs.
+    For deployment rows (has prompt+intent), creates realistic Q&A pairs.
+    For other rows, uses compact key/value with domain-specific context.
     """
+    prompt = _clean_val(row.get("prompt"))
+    intent = _clean_val(row.get("intent"))
+
+    # Deployment rows: create instruction-tuning pairs
+    if prompt and intent:
+        # Build the completion (what the model should learn to generate)
+        payload_parts = []
+        for field in ("instance_type", "cloud_provider", "region", "os",
+                       "volume_size_gb", "volume_type", "environment",
+                       "cluster_name", "node_count", "node_type", "kubernetes_version",
+                       "docker_image", "container_name", "ports",
+                       "database_engine", "database_name", "database_user",
+                       "hostname", "app_name", "app_port", "http_port",
+                       "monitoring_tool", "cicd_tool", "vpn_protocol",
+                       "cache_engine", "lb_type", "ssl_provider",
+                       "elk_version", "storage_backend", "bucket_name"):
+            val = _clean_val(row.get(field))
+            if val:
+                payload_parts.append(f"{field}: {val}")
+        payload_str = ", ".join(payload_parts) if payload_parts else "default configuration"
+        return (
+            f"### Instruction\n"
+            f"You are a cloud provisioning AI. Classify the user request and extract deployment parameters.\n\n"
+            f"### User Request\n{prompt}\n\n"
+            f"### Response\n"
+            f"Intent: {intent}\n"
+            f"Parameters: {payload_str}\n"
+        )
+
+    # Non-deployment rows: generic knowledge format
     parts: List[str] = []
     for k, v in row.items():
         if v is None:
@@ -154,13 +186,23 @@ def row_to_text(row: Dict) -> str:
             continue
         parts.append(f"{k}: {sv}")
 
-    # A simple instruction prefix encourages instruction-following behavior.
     return (
-        "You are an AI assistant for cloud provisioning and deployment. "
-        "Analyze the following telemetry record and provide insights.\n\n"
+        "### Instruction\n"
+        "You are a cloud operations AI assistant. Analyze the following data and provide insights.\n\n"
+        "### Data\n"
         + " | ".join(parts)
-        + "\n\nAnswer:"
+        + "\n\n### Response\n"
     )
+
+
+def _clean_val(v) -> str:
+    """Return cleaned string or empty string for None/NaN."""
+    if v is None:
+        return ""
+    sv = str(v).strip()
+    if sv.lower() in ("", "nan"):
+        return ""
+    return sv
 
 
 def load_json_file(file_path: Path) -> List[Dict]:
@@ -764,8 +806,15 @@ def train(cfg: TrainConfig) -> None:
         tokenizer.pad_token = tokenizer.eos_token
         model.config.pad_token_id = tokenizer.eos_token_id
 
-    # Wrap the CSV as a Dataset that yields tokenized examples.
-    dataset = CSVCausalLMDataset(df=df, tokenizer=tokenizer, max_length=cfg.text_max_length)
+    # Split into train/validation (90/10) for measuring overfitting
+    from sklearn.model_selection import train_test_split
+    train_df, val_df = train_test_split(df, test_size=0.1, random_state=cfg.seed)
+    print(f"   Train samples: {len(train_df)}")
+    print(f"   Validation samples: {len(val_df)}")
+
+    # Wrap as Datasets
+    dataset = CSVCausalLMDataset(df=train_df, tokenizer=tokenizer, max_length=cfg.text_max_length)
+    eval_dataset = CSVCausalLMDataset(df=val_df, tokenizer=tokenizer, max_length=cfg.text_max_length)
 
     # Standard causal LM collator (creates `labels` from `input_ids` for next-token prediction).
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
@@ -816,13 +865,23 @@ def train(cfg: TrainConfig) -> None:
         dataloader_pin_memory=use_cuda,
         disable_tqdm=False,
         report_to=[],
+        # Evaluation during training
+        eval_strategy="steps",
+        eval_steps=log_every * 5,
     )
+
+    def compute_metrics(eval_preds):
+        """Compute perplexity from eval loss."""
+        logits, labels = eval_preds
+        # eval_loss is computed by trainer; perplexity = exp(loss)
+        return {}  # Trainer logs eval_loss automatically; perplexity printed in callback
 
     class ProgressPrinter(TrainerCallback):
         def on_log(self, args, state, control, logs=None, **kwargs):
             if not logs:
                 return
             loss = logs.get("loss")
+            eval_loss = logs.get("eval_loss")
             lr = logs.get("learning_rate")
             epoch = logs.get("epoch")
             step = state.global_step
@@ -830,15 +889,20 @@ def train(cfg: TrainConfig) -> None:
             if epoch is not None:
                 parts.append(f"epoch={epoch:.2f}")
             if loss is not None:
-                parts.append(f"loss={loss:.4f}")
+                parts.append(f"train_loss={loss:.4f}")
+            if eval_loss is not None:
+                perplexity = math.exp(min(eval_loss, 20))  # cap to avoid overflow
+                parts.append(f"eval_loss={eval_loss:.4f}")
+                parts.append(f"perplexity={perplexity:.2f}")
             if lr is not None:
                 parts.append(f"lr={lr:.2e}")
-            print("🟢 " + " | ".join(parts))
+            print("  " + " | ".join(parts))
 
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
         processing_class=tokenizer,
         callbacks=[ProgressPrinter()],
