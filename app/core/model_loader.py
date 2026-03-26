@@ -1,5 +1,5 @@
 """
-Optimized Model Loader for Infinity AI Agents
+Optimized Model Loader for prodxcloud Agents
 Lazy loading and smart initialization for fast startup
 """
 

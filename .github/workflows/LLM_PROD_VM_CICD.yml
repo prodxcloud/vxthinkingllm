@@ -310,7 +310,7 @@ jobs:
             sleep 10
             
             # Check all containers are running
-            for svc in backend gnb-redis gnb-celery-worker gnb-celery-beat gnb-flower; do
+            for svc in backend valtunox-redis valtunox-celery-worker valtunox-celery-beat valtunox-flower; do
               if sudo docker ps | grep -q "$svc"; then
                 echo "✅ $svc is running"
               else
