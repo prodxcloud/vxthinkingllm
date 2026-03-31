@@ -19,6 +19,22 @@ import faiss
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
+# Ensure HuggingFace can reach the internet at import time.
+# These may be set to "1" in restricted/offline container environments.
+os.environ.setdefault("HF_HUB_OFFLINE", "0")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
+# Honour an explicit override but never silently break model loading.
+if os.environ.get("HF_HUB_OFFLINE") == "1" and os.environ.get("FORCE_HF_OFFLINE") != "1":
+    os.environ["HF_HUB_OFFLINE"] = "0"
+if os.environ.get("TRANSFORMERS_OFFLINE") == "1" and os.environ.get("FORCE_HF_OFFLINE") != "1":
+    os.environ["TRANSFORMERS_OFFLINE"] = "0"
+
+# Default model cache directory (pre-populated during Docker build)
+_HF_CACHE_DIR = os.environ.get(
+    "HF_HOME",
+    os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+)
+
 # Internal Cache & Metrics imports (maintaining your existing structure)
 try:
     from .cache import (
@@ -85,10 +101,45 @@ class VectorStore:
 
         # Load model
         def _load_model():
-            m = SentenceTransformer(self.model_name, device=self.device, trust_remote_code=True)
+            # Guarantee online mode unless explicitly forced offline
+            if os.environ.get("FORCE_HF_OFFLINE") != "1":
+                os.environ["HF_HUB_OFFLINE"] = "0"
+                os.environ["TRANSFORMERS_OFFLINE"] = "0"
+
+            model_kwargs = dict(
+                device=self.device,
+                trust_remote_code=True,
+                cache_folder=_HF_CACHE_DIR,
+            )
+
+            # First attempt: standard load (online or from local cache)
+            try:
+                m = SentenceTransformer(self.model_name, **model_kwargs)
+            except Exception as primary_err:
+                print(
+                    f"WARNING: Could not load '{self.model_name}' "
+                    f"({type(primary_err).__name__}: {primary_err}). "
+                    "Retrying with local_files_only=False ..."
+                )
+                try:
+                    m = SentenceTransformer(
+                        self.model_name,
+                        **model_kwargs,
+                        local_files_only=False,
+                    )
+                except Exception as retry_err:
+                    # Attempt with the short model name (without org prefix)
+                    short_name = self.model_name.split("/")[-1]
+                    print(
+                        f"WARNING: Retry failed ({retry_err}). "
+                        f"Trying short model name '{short_name}' ..."
+                    )
+                    m = SentenceTransformer(short_name, **model_kwargs)
+
             if getattr(m.tokenizer, "pad_token", None) is None:
                 m.tokenizer.pad_token = m.tokenizer.eos_token
             return m
+
         self.model = await loop.run_in_executor(self.executor, _load_model)
 
         # Detect embedding dimension from model

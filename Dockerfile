@@ -49,6 +49,17 @@ RUN playwright install chromium  && \
 #      (echo "⚠️  ChatGoogleGenerativeAI import failed - this may be fixed by the patch in agents.py" && \
 #       python -c "import traceback; import sys; sys.path.insert(0, '/app'); from app.services.agents.agents import GEMINI_AVAILABLE; print(f'GEMINI_AVAILABLE will be set during app startup: {GEMINI_AVAILABLE}')" || true))
 
+# Pre-download the sentence-transformers embedding model so the container
+# can start without requiring outbound network access at runtime.
+RUN python -c "\
+import os; \
+os.environ['HF_HUB_OFFLINE'] = '0'; \
+os.environ['TRANSFORMERS_OFFLINE'] = '0'; \
+from sentence_transformers import SentenceTransformer; \
+print('Downloading all-MiniLM-L6-v2 ...'); \
+SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); \
+print('Model cached successfully.')"
+
 # Copy .env file
 COPY .env .env
 
@@ -58,12 +69,12 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/data /app/backups
 
-# Expose port 8000
-EXPOSE 8000
+# Expose port 8745
+EXPOSE 8745
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8745/health || exit 1
 
 # Run the FastAPI application with uvicorn
-CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8745"]
