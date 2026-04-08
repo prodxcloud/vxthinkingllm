@@ -10,6 +10,8 @@ import os
 import json
 import pickle
 import torch
+import re
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Union
 import pandas as pd
@@ -19,15 +21,9 @@ import faiss
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-# Ensure HuggingFace can reach the internet at import time.
-# These may be set to "1" in restricted/offline container environments.
+# Respect offline environment flags by default.
 os.environ.setdefault("HF_HUB_OFFLINE", "0")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
-# Honour an explicit override but never silently break model loading.
-if os.environ.get("HF_HUB_OFFLINE") == "1" and os.environ.get("FORCE_HF_OFFLINE") != "1":
-    os.environ["HF_HUB_OFFLINE"] = "0"
-if os.environ.get("TRANSFORMERS_OFFLINE") == "1" and os.environ.get("FORCE_HF_OFFLINE") != "1":
-    os.environ["TRANSFORMERS_OFFLINE"] = "0"
 
 # Default model cache directory (pre-populated during Docker build)
 _HF_CACHE_DIR = os.environ.get(
@@ -68,6 +64,44 @@ EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = None  # Auto-detected at runtime from model (384 for all-MiniLM-L6-v2)
 # ============================================================================
 
+class LocalHashEmbeddingModel:
+    """Deterministic, dependency-free embedding fallback for offline startup."""
+
+    def __init__(self, embedding_dim: int = 384):
+        self.embedding_dim = embedding_dim
+
+    def _tokenize(self, text: str) -> List[str]:
+        return re.findall(r"\w+", (text or "").lower())
+
+    def _hash_token(self, token: str) -> Tuple[int, float]:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[:4], "little") % self.embedding_dim
+        sign = 1.0 if (digest[4] & 1) == 0 else -1.0
+        return idx, sign
+
+    def encode(
+        self,
+        texts: Union[str, List[str]],
+        convert_to_numpy: bool = True,
+        show_progress_bar: bool = False,
+    ) -> np.ndarray:
+        if isinstance(texts, str):
+            texts = [texts]
+
+        vectors = np.zeros((len(texts), self.embedding_dim), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for token in self._tokenize(text):
+                idx, sign = self._hash_token(token)
+                vectors[row, idx] += sign
+
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        vectors = vectors / norms
+
+        if convert_to_numpy:
+            return vectors
+        return vectors.tolist()
+
 class VectorStore:
     """Manages embeddings, FAISS IndexFlatIP, and vector database persistence"""
 
@@ -101,10 +135,11 @@ class VectorStore:
 
         # Load model
         def _load_model():
-            # Guarantee online mode unless explicitly forced offline
-            if os.environ.get("FORCE_HF_OFFLINE") != "1":
-                os.environ["HF_HUB_OFFLINE"] = "0"
-                os.environ["TRANSFORMERS_OFFLINE"] = "0"
+            offline_mode = (
+                os.environ.get("FORCE_HF_OFFLINE") == "1"
+                or os.environ.get("HF_HUB_OFFLINE") == "1"
+                or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+            )
 
             model_kwargs = dict(
                 device=self.device,
@@ -112,32 +147,51 @@ class VectorStore:
                 cache_folder=_HF_CACHE_DIR,
             )
 
-            # First attempt: standard load (online or from local cache)
-            try:
-                m = SentenceTransformer(self.model_name, **model_kwargs)
-            except Exception as primary_err:
-                print(
-                    f"WARNING: Could not load '{self.model_name}' "
-                    f"({type(primary_err).__name__}: {primary_err}). "
-                    "Retrying with local_files_only=False ..."
-                )
+            if offline_mode:
                 try:
-                    m = SentenceTransformer(
-                        self.model_name,
-                        **model_kwargs,
-                        local_files_only=False,
-                    )
-                except Exception as retry_err:
-                    # Attempt with the short model name (without org prefix)
-                    short_name = self.model_name.split("/")[-1]
+                    m = SentenceTransformer(self.model_name, **model_kwargs, local_files_only=True)
+                except Exception as local_err:
                     print(
-                        f"WARNING: Retry failed ({retry_err}). "
-                        f"Trying short model name '{short_name}' ..."
+                        f"WARNING: Offline mode is enabled and '{self.model_name}' "
+                        f"is not available in cache ({local_err}). "
+                        "Using local hash embedding fallback."
                     )
-                    m = SentenceTransformer(short_name, **model_kwargs)
+                    return LocalHashEmbeddingModel()
+            else:
+                # First attempt: standard load (online or from local cache)
+                try:
+                    m = SentenceTransformer(self.model_name, **model_kwargs)
+                except Exception as primary_err:
+                    print(
+                        f"WARNING: Could not load '{self.model_name}' "
+                        f"({type(primary_err).__name__}: {primary_err}). "
+                        "Retrying with local_files_only=False ..."
+                    )
+                    try:
+                        m = SentenceTransformer(
+                            self.model_name,
+                            **model_kwargs,
+                            local_files_only=False,
+                        )
+                    except Exception as retry_err:
+                        # Attempt with the short model name (without org prefix)
+                        short_name = self.model_name.split("/")[-1]
+                        print(
+                            f"WARNING: Retry failed ({retry_err}). "
+                            f"Trying short model name '{short_name}' ..."
+                        )
+                        try:
+                            m = SentenceTransformer(short_name, **model_kwargs)
+                        except Exception as final_err:
+                            print(
+                                f"WARNING: Could not load remote embedding model ({final_err}). "
+                                "Using local hash embedding fallback."
+                            )
+                            return LocalHashEmbeddingModel()
 
-            if getattr(m.tokenizer, "pad_token", None) is None:
-                m.tokenizer.pad_token = m.tokenizer.eos_token
+            tokenizer = getattr(m, "tokenizer", None)
+            if tokenizer and getattr(tokenizer, "pad_token", None) is None:
+                tokenizer.pad_token = tokenizer.eos_token
             return m
 
         self.model = await loop.run_in_executor(self.executor, _load_model)

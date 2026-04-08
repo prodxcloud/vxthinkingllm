@@ -819,7 +819,21 @@ def train(cfg: TrainConfig) -> None:
     # Standard causal LM collator (creates `labels` from `input_ids` for next-token prediction).
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # WSL/NTFS can report FileExistsError even when dir doesn't show in ls.
+        # Force-recreate by removing the ghost entry first.
+        import shutil
+        try:
+            shutil.rmtree(cfg.output_dir, ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            cfg.output_dir.unlink(missing_ok=True)
+        except Exception:
+            pass
+        cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Use GPU when available; pick bf16/fp16 automatically.
     use_cuda = torch.cuda.is_available()
