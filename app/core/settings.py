@@ -157,7 +157,21 @@ class Settings(BaseSettings):
     # Local Voice Models (Fallback)
     local_asr_model: str = "faster-whisper-base"
     local_tts_model: str = "kokoro-82m"
-    
+
+    # ------------------------------------------------------------------
+    # Specialist Models — ProdxCloud multi-model monorepo
+    # ------------------------------------------------------------------
+    # Each specialist loads an HF-format model directory (config.json +
+    # tokenizer.json + pytorch_model.bin) at app startup. Override the path
+    # via env var (CLOUDLLM_MODEL_PATH, CODINGLLM_MODEL_PATH, etc.) or leave
+    # default to use the dir produced by the matching train.py wrapper.
+    cloudllm_model_path: str = "app/data/models/cloudllm"
+    codingllm_model_path: str = "app/data/models/codingllm"
+    supportllm_model_path: str = "app/data/models/supportllm"
+    cloudllm_device: str = "cuda"
+    codingllm_device: str = "cuda"
+    supportllm_device: str = "cuda"
+
     # Security, Monitoring & Logging (Unchanged)
     secret_key: str = "your-secret-key-change-in-production"
     algorithm: str = "HS256"
@@ -298,6 +312,18 @@ def get_voice_config() -> Dict[str, Any]:
         "local_asr_model": settings.local_asr_model,
         "local_tts_model": settings.local_tts_model,
     }
+
+# --- Specialist model registry (ProdxCloud multi-model monorepo) ---
+# Single source of truth for the names and /v1 prefixes of every specialist
+# model exposed by this service. Keep in sync with the routers registered
+# in app/app.py.
+SPECIALIST_MODELS: Dict[str, Dict[str, str]] = {
+    "thinkingllm": {"name": "VxThinking v1.2", "prefix": "/api/models/v1"},
+    "cloudllm":    {"name": "VxCloud v1.0",    "prefix": "/v1/cloud"},
+    "codingllm":   {"name": "VxCoder v1.0",    "prefix": "/v1/coding"},
+    "supportllm":  {"name": "VxSupport v1.0",  "prefix": "/v1/support"},
+}
+
 
 # --- 6. Aliases for Backward Compatibility ---
 # These ensure any existing agents still work with the new Settings structure

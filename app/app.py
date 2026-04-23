@@ -1,16 +1,16 @@
 """
-VaLLM - Vector-based Local LLM for Cloud Operations
+VxThinkingLLM - Vector-based Local LLM for Cloud Operations
 =====================================================
 FastAPI application with embeddings, FAISS, and chain-of-thoughts reasoning.
 
 A sovereign, private AI reasoning engine for cloud infrastructure operations.
-Unlike generic LLMs, VaLLM is grounded in your actual production data (logs,
+Unlike generic LLMs, VxThinkingLLM is grounded in your actual production data (logs,
 resources, configurations) and provides precise DevOps intelligence.
 
 ARCHITECTURE:
 =============
     ┌─────────────────────────────────────────────────────────────┐
-    │                      VaLLM CORE                             │
+    │                      VxThinkingLLM CORE                             │
     ├─────────────────────────────────────────────────────────────┤
     │  Embeddings (sentence-transformers/all-MiniLM-L6-v2)        │
     │  Vector Store (FAISS) ─────► Semantic Search                │
@@ -37,17 +37,17 @@ USAGE:
     # Quick start
     python -m app.app
 
-    # Auto-train is on by default; set VALLM_AUTO_TRAIN=false to disable
+    # Auto-train is on by default; set VxThinkingLLM_AUTO_TRAIN=false to disable
 
 ENVIRONMENT VARIABLES:
 ======================
-    VALLM_AUTO_PRECOMPUTE=true  (default: true)  - Auto-build FAISS if missing
-    VALLM_AUTO_TRAIN=true       (default: true)  - Auto-train LLM if missing
+    VxThinkingLLM_AUTO_PRECOMPUTE=true  (default: true)  - Auto-build FAISS if missing
+    VxThinkingLLM_AUTO_TRAIN=true       (default: true)  - Auto-train LLM if missing
     USE_CUDA=true               (default: false) - Use GPU for inference
-    VALLM_CACHE_EMBEDDINGS=true (default: true)  - Cache query embeddings (L1, TTL 1h)
-    VALLM_CACHE_SEARCH=true     (default: true)  - Cache search results (L2, TTL 30m)
-    VALLM_CACHE_EMBEDDINGS_MAXSIZE (default: 2000)
-    VALLM_CACHE_SEARCH_MAXSIZE     (default: 1000)
+    VxThinkingLLM_CACHE_EMBEDDINGS=true (default: true)  - Cache query embeddings (L1, TTL 1h)
+    VxThinkingLLM_CACHE_SEARCH=true     (default: true)  - Cache search results (L2, TTL 30m)
+    VxThinkingLLM_CACHE_EMBEDDINGS_MAXSIZE (default: 2000)
+    VxThinkingLLM_CACHE_SEARCH_MAXSIZE     (default: 1000)
 
 API ENDPOINTS:
 ==============
@@ -78,7 +78,7 @@ DEPLOYMENT:
 ===========
     Single Node:  python -m app.app
     Production:   uvicorn app.app:app --host 0.0.0.0 --port 8745 --workers 4
-    Docker:       docker run -p 8745:8745 vallm:latest
+    Docker:       docker run -p 8745:8745 VxThinkingLLM:latest
     Kubernetes:   See README.md for deployment manifests
 """
 
@@ -113,9 +113,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 # AUTO-BUILD CONFIGURATION
 # =============================================================================
 # Set to True to automatically run precompute.py when FAISS index is missing
-AUTO_PRECOMPUTE = os.getenv("VALLM_AUTO_PRECOMPUTE", "true").lower() == "true"
+AUTO_PRECOMPUTE = os.getenv("VxThinkingLLM_AUTO_PRECOMPUTE", "true").lower() == "true"
 # Set to True to automatically run train.py when model is missing (takes longer!)
-AUTO_TRAIN = os.getenv("VALLM_AUTO_TRAIN", "true").lower() == "true"
+AUTO_TRAIN = os.getenv("VxThinkingLLM_AUTO_TRAIN", "true").lower() == "true"
 
 # =============================================================================
 # LOGGING CONFIGURATION
@@ -127,7 +127,7 @@ LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "logs.txt"
 
 # Custom formatter for beautiful logs
-class VaLLMFormatter(logging.Formatter):
+class VxThinkingLLMFormatter(logging.Formatter):
     """Custom formatter with colors and structured output"""
     
     COLORS = {
@@ -160,13 +160,13 @@ class VaLLMFormatter(logging.Formatter):
 
 
 # Configure logger
-logger = logging.getLogger("vallm")
+logger = logging.getLogger("VxThinkingLLM")
 logger.setLevel(logging.DEBUG)
 
 # Console handler (with colors)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
-console_formatter = VaLLMFormatter()
+console_formatter = VxThinkingLLMFormatter()
 console_handler.setFormatter(console_formatter)
 
 # File handler (no colors, detailed)
@@ -320,6 +320,14 @@ try:
     from .services.ai.ml.reasoning import ReasoningEngine
     from .services.ai.ml.routes import router, router_v2, router_v3
     from .services.ai.ml.cloud_routes import router as cloud_router
+    # Specialist backends — ProdxCloud multi-model monorepo
+    from .services.ai.ml.cloudllm import CloudLLMBackend, build_cloudllm_config
+    from .services.ai.ml.codingllm import CodingLLMBackend, build_codingllm_config
+    from .services.ai.ml.supportllm import SupportLLMBackend, build_supportllm_config
+    from .services.ai.ml.cloudllm.routes import router as cloudllm_router
+    from .services.ai.ml.codingllm.routes import router as codingllm_router
+    from .services.ai.ml.supportllm.routes import router as supportllm_router
+    from .services.ai.ml.universal import router as universal_router
 except ImportError as e:
     # Only fall back when running without a package context.
     if "attempted relative import with no known parent package" in str(e):
@@ -327,6 +335,13 @@ except ImportError as e:
         from services.ai.ml.reasoning import ReasoningEngine
         from services.ai.ml.routes import router, router_v2, router_v3
         from services.ai.ml.cloud_routes import router as cloud_router
+        from services.ai.ml.cloudllm import CloudLLMBackend, build_cloudllm_config
+        from services.ai.ml.codingllm import CodingLLMBackend, build_codingllm_config
+        from services.ai.ml.supportllm import SupportLLMBackend, build_supportllm_config
+        from services.ai.ml.cloudllm.routes import router as cloudllm_router
+        from services.ai.ml.codingllm.routes import router as codingllm_router
+        from services.ai.ml.supportllm.routes import router as supportllm_router
+        from services.ai.ml.universal import router as universal_router
     else:
         raise
 
@@ -500,7 +515,7 @@ def matrix_print(text: str, style: str = "info"):
 
 def display_matrix_banner():
     """Display Matrix-style startup banner (large, wide logo)"""
-    # VaLLM logo - original then doubled for 2x width
+    # VxThinkingLLM logo - original then doubled for 2x width
     raw_lines = [
         "    ██╗   ██╗ █████╗ ██╗     ██╗     ███╗   ███╗",
         "    ██║   ██║██╔══██╗██║     ██║     ████╗ ████║",
@@ -531,7 +546,7 @@ def display_matrix_banner():
         print(banner)
     except UnicodeEncodeError:
         # Simplified banner for consoles with limited character support
-        print("\033[92m    VaLLM - Vector-Augmented Local Language Model\033[0m")
+        print("\033[92m    VxThinkingLLM - Vector-Augmented Local Language Model\033[0m")
 
 
 def display_loading_bar(text: str, current: int, total: int):
@@ -627,7 +642,7 @@ def display_system_info(
                 print("    │  Vector store missing or empty. To enable semantic search:  │")
                 print("    │  1. Add CSV/text files to app/data/datasets/                 │")
                 print("    │  2. Run: python -m app.services.ai.ml.precompute            │")
-                print("    │  Or set VALLM_AUTO_PRECOMPUTE=true (default) to auto-build.   │")
+                print("    │  Or set VxThinkingLLM_AUTO_PRECOMPUTE=true (default) to auto-build.   │")
             if not model_loaded:
                 print("    │  LLM model not found. To enable generation:                   │")
                 print("    │  Run: python -m app.services.ai.ml.train                     │")
@@ -729,7 +744,26 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 matrix_print(f"    ⚠️  FAISS error: {e}", "warning")
         else:
-            matrix_print("    ⚠️  No FAISS index; run precompute or set VALLM_AUTO_PRECOMPUTE=true", "warning")
+            matrix_print("    ⚠️  No FAISS index; run precompute or set VxThinkingLLM_AUTO_PRECOMPUTE=true", "warning")
+
+        # Step 6b: Specialist backends (CloudLLM / CodingLLM / SupportLLM)
+        # Each loads an HF-format model directory; if missing, falls back to
+        # a tiny base model so the route still responds.
+        specialist_device = device  # mirror VxThinkingLLM's device choice
+        cloudllm_backend = CloudLLMBackend(build_cloudllm_config(device=specialist_device))
+        codingllm_backend = CodingLLMBackend(build_codingllm_config(device=specialist_device))
+        supportllm_backend = SupportLLMBackend(build_supportllm_config(device=specialist_device))
+        for be in (cloudllm_backend, codingllm_backend, supportllm_backend):
+            try:
+                be.load()
+                label = "loaded" if be.loaded else "degraded"
+                matrix_print(
+                    f"    ✓ {be.cfg.display_name} {label} "
+                    f"(from {be.loaded_from or 'n/a'}, device={be.effective_device})",
+                    "success" if be.loaded else "warning",
+                )
+            except Exception as e:
+                matrix_print(f"    ⚠️  {be.cfg.display_name} load error: {e}", "warning")
 
         # Step 7: App state and system info
         display_loading_bar("Completing initialization", 7, 7)
@@ -738,6 +772,9 @@ async def lifespan(app: FastAPI):
         app.state.tokenizer = tokenizer
         app.state.model = model
         app.state.faiss_index = faiss_index
+        app.state.cloudllm = cloudllm_backend
+        app.state.codingllm = codingllm_backend
+        app.state.supportllm = supportllm_backend
 
         model_info = _gather_model_info(model_dir)
         vs_info = _gather_vectorstore_info(vectorstore_dir, vector_count, datasets_dir)
@@ -753,7 +790,7 @@ async def lifespan(app: FastAPI):
             vs_info=vs_info,
         )
         
-        matrix_print("    ⚡ VALLM NEURAL NETWORK ONLINE ⚡\n", "header")
+        matrix_print("    ⚡ VxThinkingLLM NEURAL NETWORK ONLINE ⚡\n", "header")
         
     except Exception as e:
         matrix_print(f"\n    ❌ CRITICAL ERROR: {e}", "error")
@@ -775,7 +812,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="VaLLM - Vector-based Local LLM",
+    title="VxThinkingLLM - Vector-based Local LLM",
     description="Private cloud operations AI with embeddings and chain-of-thoughts reasoning",
     version="1.0.0",
     lifespan=lifespan
@@ -824,6 +861,12 @@ app.include_router(router_v2, prefix="/api/models/v2")
 app.include_router(router_v3, prefix="/api/models/v3")
 app.include_router(cloud_router)  # POST /api/cloud/provision-intent (intent + Golang payload)
 
+# Specialist model routers — ProdxCloud multi-model monorepo
+app.include_router(cloudllm_router)     # /v1/cloud/*   (VxCloud v1.0)
+app.include_router(codingllm_router)    # /v1/coding/*  (VxCoder v1.0)
+app.include_router(supportllm_router)   # /v1/support/* (VxSupport v1.0)
+app.include_router(universal_router)    # /v1/ask       (keyword-routed dispatch)
+
 # Include monitoring routes
 try:
     try:
@@ -842,14 +885,14 @@ except ImportError as e:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Display a beautiful status page for the VaLLM service."""
+    """Display a beautiful status page for the VxThinkingLLM service."""
     html_content = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VaLLM Status</title>
+    <title>VxThinkingLLM Status</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -894,7 +937,7 @@ async def root():
 </head>
 <body>
     <div class="container">
-        <h1>VaLLM</h1>
+        <h1>VxThinkingLLM</h1>
         <p>Vector-Augmented Local Language Model</p>
         <div class="status">Online</div>
     </div>
