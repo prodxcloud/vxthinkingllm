@@ -42,7 +42,7 @@ SUPPORTED FILE FORMATS:
 
 OUTPUT:
 =======
-    app/data/models/
+    app/data/models/thinkingllm/
         config.json
         tokenizer.json
         pytorch_model.bin
@@ -138,6 +138,7 @@ class TrainConfig:
     warmup_ratio: float
     seed: int
     file_types: List[str]  # Supported: csv, json, txt, pdf
+    no_eval: bool = False  # Skip mid-training eval (avoids OOM on small GPUs)
 
 
 def row_to_text(row: Dict) -> str:
@@ -145,8 +146,30 @@ def row_to_text(row: Dict) -> str:
 
     Uses instruction-tuning format with explicit prompt/completion pairs.
     For deployment rows (has prompt+intent), creates realistic Q&A pairs.
+    For markdown / text chunks (has 'content'), returns the chunk as a natural
+    passage with a soft document/section heading — never leaks metadata
+    field names (section_index, total_sections, _source_type) into the text,
+    since the model would otherwise learn to emit them.
     For other rows, uses compact key/value with domain-specific context.
     """
+    # Fast path: TXT/MD chunks from load_txt_file → train as a natural passage.
+    content = _clean_val(row.get("content"))
+    source = _clean_val(row.get("source"))
+    if content and source:
+        # Pull the first markdown header out of the chunk if present, so the
+        # model sees "### Section: <heading>" as a soft topic anchor.
+        first_line = content.splitlines()[0].strip() if content else ""
+        section = ""
+        if first_line.startswith("#"):
+            section = first_line.lstrip("#").strip()
+            body = "\n".join(content.splitlines()[1:]).strip()
+        else:
+            body = content
+        header = f"### Document: {source}"
+        if section:
+            header += f"\n### Section: {section}"
+        return f"{header}\n\n{body}\n"
+
     prompt = _clean_val(row.get("prompt"))
     intent = _clean_val(row.get("intent"))
 
@@ -656,6 +679,23 @@ def train(cfg: TrainConfig) -> None:
                     except Exception as e:
                         print(f"⚠️  Warning: Could not parse TXT {p}: {e}")
 
+        # Process MD files (reuses the TXT loader; it already splits by markdown headers)
+        if 'md' in cfg.file_types:
+            md_paths = sorted(p for p in cfg.dataset_dir.glob("*.md") if p.is_file() and not _skip_non_provisioning(p))
+            if md_paths:
+                print(f"📝 Found {len(md_paths)} MD files...")
+                for p in md_paths:
+                    try:
+                        rows = load_txt_file(p)
+                        if rows:
+                            frame = pd.DataFrame(rows)
+                            frame['_source_type'] = 'md'
+                            frames.append(frame)
+                            total_files += 1
+                            print(f"    ✓ Loaded {len(rows)} chunks from {p.name}")
+                    except Exception as e:
+                        print(f"⚠️  Warning: Could not parse MD {p}: {e}")
+
         # Process PDF files
         if 'pdf' in cfg.file_types:
             pdf_paths = sorted(p for p in cfg.dataset_dir.glob("*.pdf") if p.is_file() and not _skip_non_provisioning(p))
@@ -880,7 +920,7 @@ def train(cfg: TrainConfig) -> None:
         disable_tqdm=False,
         report_to=[],
         # Evaluation during training
-        eval_strategy="steps",
+        eval_strategy="no" if cfg.no_eval else "steps",
         eval_steps=log_every * 5,
     )
 
@@ -957,7 +997,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(Path("app") / "data" / "datasets" / "cloud_deployments.csv"),
+        default=str(Path("app") / "data" / "datasets" / "thinkingllm" / "cloud_deployments.csv"),
         help="Path to training file (CSV, JSON, TXT, or PDF)",
     )
     parser.add_argument(
@@ -965,7 +1005,7 @@ def parse_args() -> TrainConfig:
         type=str,
         nargs="?",
         const="",
-        default=str(Path("app") / "data" / "datasets"),
+        default=str(Path("app") / "data" / "datasets" / "thinkingllm"),
         help=(
             "If set, train on all supported files in this folder (recommended). "
             "Pass no value to disable and train only on --dataset."
@@ -980,8 +1020,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--file-types",
         type=str,
-        default="csv,json,txt,pdf,sql,xlsx,xls",
-        help="Comma-separated list of file types to include (default: csv,json,txt,pdf,sql,xlsx,xls)",
+        default="csv,json,txt,md,pdf,sql,xlsx,xls",
+        help="Comma-separated list of file types to include (default: csv,json,txt,md,pdf,sql,xlsx,xls)",
     )
     parser.add_argument(
         "--model-name-or-path",
@@ -992,7 +1032,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=str(Path("app") / "data" / "models"),
+        default=str(Path("app") / "data" / "models" / "thinkingllm"),
         help="Output folder for trained model weights",
     )
     parser.add_argument("--text-max-length", type=int, default=512)
@@ -1003,12 +1043,14 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-ratio", type=float, default=0.03)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-eval", action="store_true",
+                        help="Skip mid-training evaluation (avoids OOM on small GPUs)")
 
     args = parser.parse_args()
 
     # Parse file types
     file_types = [ft.strip().lower() for ft in args.file_types.split(',')]
-    valid_types = {'csv', 'json', 'txt', 'pdf', 'sql', 'xlsx', 'xls'}
+    valid_types = {'csv', 'json', 'txt', 'md', 'pdf', 'sql', 'xlsx', 'xls'}
     invalid = set(file_types) - valid_types
     if invalid:
         parser.error(f"Invalid file types: {invalid}. Valid types: {valid_types}")
@@ -1028,6 +1070,7 @@ def parse_args() -> TrainConfig:
         warmup_ratio=args.warmup_ratio,
         seed=args.seed,
         file_types=file_types,
+        no_eval=args.no_eval,
     )
 
 

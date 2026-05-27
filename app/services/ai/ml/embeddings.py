@@ -114,8 +114,11 @@ class VectorStore:
         self.metadata = []
         self.content_ids = []
 
-        # Paths
-        self.data_storage_dir = self.data_dir / "vectorstore"
+        # Paths — April 2026 reorg moved the thinkingllm FAISS index out of
+        # the top-level `vectorstore/` into `precompute/thinkingllm/` so every
+        # model (thinkingllm, cloudllm, codingllm, supportllm) follows one
+        # convention: `data/precompute/<slug>/`.
+        self.data_storage_dir = self.data_dir / "precompute" / "thinkingllm"
         self.data_storage_dir.mkdir(exist_ok=True, parents=True)
         self.index_path = self.data_storage_dir / "faiss_index.bin"
         self.documents_path = self.data_storage_dir / "documents.pkl"

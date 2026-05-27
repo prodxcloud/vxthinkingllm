@@ -50,7 +50,7 @@ def main() -> int:
         ),
         (
             "supportllm", su.build_supportllm_config(device="cpu"),
-            "How do I deploy the prodxcloud frontend to a VM using the valtunox deploy script?",
+            "How do I deploy the prodxcloud frontend to a VM using the vxcloud deploy script?",
         ),
     ]
 

@@ -49,6 +49,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-ratio", type=float, default=0.03)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-eval", action="store_true",
+                        help="Skip mid-training evaluation (avoids OOM on small GPUs)")
     args = parser.parse_args()
 
     file_types = [ft.strip().lower() for ft in args.file_types.split(",") if ft.strip()]
@@ -68,6 +70,7 @@ def parse_args() -> TrainConfig:
         warmup_ratio=args.warmup_ratio,
         seed=args.seed,
         file_types=file_types,
+        no_eval=args.no_eval,
     )
 
 

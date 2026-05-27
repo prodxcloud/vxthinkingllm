@@ -172,7 +172,7 @@ class TestPayloadGeneration(unittest.TestCase):
     def test_provision_fastapi_payload(self):
         raw = {
             "username": "joel", "app_name": "myapi", "app_port": "8000",
-            "hostname": "api.example.com", "ssh_username": "ubuntu",
+            "hostname": "api.vxcloud.io", "ssh_username": "ubuntu",
         }
         payload = _raw_to_golang_payload(raw, "provision_fastapi")
         self.assertEqual(payload["app_name"], "myapi")
@@ -273,7 +273,7 @@ class TestDevOpsAgentIntents(unittest.TestCase):
         logger.info("PASS: AWS API Gateway terraform intent")
 
     def test_terraform_docker_grafana(self):
-        matches = [r for r in self.action_rows if 'terraform_docker_ubuntu_grafana' in r['path']]
+        matches = [r for r in self.action_rows if 'terraform_docker_linux_grafana' in r['path']]
         self.assertGreater(len(matches), 0)
         logger.info("PASS: Docker Grafana terraform intent")
 
@@ -534,7 +534,7 @@ class TestV1QueryEndpoint(unittest.TestCase):
         mock_re.reason = AsyncMock(return_value={
             "intent": "execute_terraform",
             "confidence": 0.88,
-            "final_answer": "Use terraform_docker_ubuntu_grafana to deploy Grafana.",
+            "final_answer": "Use terraform_docker_linux_grafana to deploy Grafana.",
             "steps": [{"step": "classify", "result": "execute_terraform"}],
         })
         request = QueryRequest(query="Deploy Grafana monitoring", include_reasoning=True)

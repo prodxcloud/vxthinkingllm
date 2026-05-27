@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: va_llm_v1
-    image: ${DOCKER_IMAGE:-valtunox/va_llm_v1:latest}
+    image: ${DOCKER_IMAGE:-vxcloud/va_llm_v1:latest}
     ports:
       - "${PORT:-8745}:8745"
     networks:
@@ -15,7 +15,7 @@ services:
         condition: service_healthy
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-production}
-      - DATABASE_HOST=db.example.com
+      - DATABASE_HOST=db.vxcloud.io
       - DATABASE_PORT=5432
       - DATABASE_NAME=cloudsystem
       - DATABASE_USER=postgres

@@ -328,6 +328,7 @@ try:
     from .services.ai.ml.codingllm.routes import router as codingllm_router
     from .services.ai.ml.supportllm.routes import router as supportllm_router
     from .services.ai.ml.universal import router as universal_router
+    from .services.web import router as web_router
 except ImportError as e:
     # Only fall back when running without a package context.
     if "attempted relative import with no known parent package" in str(e):
@@ -342,6 +343,7 @@ except ImportError as e:
         from services.ai.ml.codingllm.routes import router as codingllm_router
         from services.ai.ml.supportllm.routes import router as supportllm_router
         from services.ai.ml.universal import router as universal_router
+        from services.web import router as web_router
     else:
         raise
 
@@ -535,10 +537,10 @@ def display_matrix_banner():
 \033[96m
     ┌──────────────────────────────────────────────────────────────────────────────┐
     │                                                                              │
-    │          V E C T O R - A U G M E N T E D   L O C A L   L A N G U A G E        │
-    │                              M O D E L                                        │
+    │       VxThinkingLLM  •  ProdxCloud Multi-Model Platform (3 + 1)              │
     │                                                                              │
-    │           Cloud Operations  •  DevOps Intelligence  •  Fine Funed Model           │
+    │   VxThinking (core)  •  VxCloud  •  VxCoder  •  VxSupport                    │
+    │   FAISS RAG  •  Chain-of-Thoughts  •  Universal /v1/ask Dispatcher           │
     │                                                                              │
     └──────────────────────────────────────────────────────────────────────────────┘
 \033[0m"""
@@ -577,8 +579,8 @@ def display_system_info(
     """Display system configuration with datasets, model architecture, and vectorstore details."""
     _datasets = datasets_dir if datasets_dir is not None else data_dir / "datasets"
     csv_count = check_csv_files(_datasets)
-    vs_path = vectorstore_path or data_dir / "vectorstore"
-    mdl_path = model_path or data_dir / "model"
+    vs_path = vectorstore_path or data_dir / "precompute" / "thinkingllm"
+    mdl_path = model_path or data_dir / "models" / "thinkingllm"
     model_info = model_info or _gather_model_info(Path(mdl_path))
     vs_info = vs_info or _gather_vectorstore_info(Path(vs_path), vector_count, Path(_datasets))
     vs_str = _pad(str(vs_path)[-38:], 38)
@@ -627,9 +629,13 @@ def display_system_info(
         print("    │  🔄 Auto-Precompute   : " + _pad("ON" if AUTO_PRECOMPUTE else "OFF") + " │")
         print("    │  🔄 Auto-Train        : " + _pad("ON" if AUTO_TRAIN else "OFF") + " │")
         print("    ├─────────────────────────────────────────────────────────┤")
-        print("    │  GET  /health          POST /api/models/v1/query (RAG)  │")
-        print("    │  GET  /logs            POST /api/models/v2/query (NLP)  │")
-        print("    │  POST /api/models/v3/query (Incident patterns)           │")
+        print("    │              ProdxCloud Multi-Model Platform            │")
+        print("    │  • VxThinking (core) → /generate, /api/models/v{1,2,3}  │")
+        print("    │  • VxCloud           → /v1/cloud/{generate,query}       │")
+        print("    │  • VxCoder           → /v1/coding/{generate,edit,review}│")
+        print("    │  • VxSupport         → /v1/support/{generate,ticket}    │")
+        print("    │  • Universal         → POST /v1/ask  (auto-routes)      │")
+        print("    │  GET  /health   GET /docs   GET /redoc                  │")
         print("    └─────────────────────────────────────────────────────────┘")
         print("\033[0m")
 
@@ -673,11 +679,17 @@ async def lifespan(app: FastAPI):
         # Step 1: Data directory and paths
         display_loading_bar("Scanning data directory", 1, 7)
         data_dir = Path(__file__).parent / "data"
-        datasets_dir = data_dir / "datasets"
-        vectorstore_dir = data_dir / "vectorstore"
+        # VxThinkingLLM (the planning/RAG model that has always lived at the
+        # root of `app/data/`) now follows the same per-slug convention as the
+        # specialist models: datasets, models, and precompute each get a
+        # `thinkingllm/` subdir. Legacy readers of the pre-reorg paths
+        # (`data/vectorstore`, `data/models/{config,pytorch_model,tokenizer}.json`)
+        # are no longer supported — the April 2026 reorg moved them here.
+        datasets_dir = data_dir / "datasets" / "thinkingllm"
+        vectorstore_dir = data_dir / "precompute" / "thinkingllm"
         faiss_index_path = vectorstore_dir / "faiss_index.bin"
         documents_file = vectorstore_dir / "documents.pkl"
-        model_dir = data_dir / "models"
+        model_dir = data_dir / "models" / "thinkingllm"
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if not data_dir.exists():
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -812,10 +824,15 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="VxThinkingLLM - Vector-based Local LLM",
-    description="Private cloud operations AI with embeddings and chain-of-thoughts reasoning",
-    version="1.0.0",
-    lifespan=lifespan
+    title="VxThinkingLLM — ProdxCloud Multi-Model Platform (3 + 1)",
+    description=(
+        "Sovereign, fine-tuned LLM platform with 3 specialist models "
+        "(VxCloud, VxCoder, VxSupport) routed by 1 reasoning core (VxThinking). "
+        "FAISS vector search, chain-of-thoughts reasoning, and a universal "
+        "/v1/ask dispatcher."
+    ),
+    version="1.2.0",
+    lifespan=lifespan,
 )
 
 # Request/Response logging middleware
@@ -866,6 +883,7 @@ app.include_router(cloudllm_router)     # /v1/cloud/*   (VxCloud v1.0)
 app.include_router(codingllm_router)    # /v1/coding/*  (VxCoder v1.0)
 app.include_router(supportllm_router)   # /v1/support/* (VxSupport v1.0)
 app.include_router(universal_router)    # /v1/ask       (keyword-routed dispatch)
+app.include_router(web_router)          # /v1/web/*     (search · scrape · external context)
 
 # Include monitoring routes
 try:
@@ -885,61 +903,142 @@ except ImportError as e:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Display a beautiful status page for the VxThinkingLLM service."""
+    """Welcome page listing the 3 + 1 model platform and key endpoints."""
     html_content = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VxThinkingLLM Status</title>
+    <title>VxThinkingLLM — ProdxCloud Multi-Model Platform</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+            padding: 40px 20px;
+            min-height: 100vh;
             background: linear-gradient(135deg, #2b5876, #4e4376);
             color: white;
-            text-align: center;
         }
-        .container {
-            padding: 40px;
+        .wrap {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+        .card {
+            padding: 32px 40px;
             border-radius: 15px;
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.25);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.18);
+            margin-bottom: 24px;
         }
         h1 {
-            font-size: 4rem;
-            margin-bottom: 10px;
-            font-weight: 600;
+            font-size: 3rem;
+            margin: 0 0 6px 0;
+            font-weight: 700;
+            letter-spacing: 1px;
         }
-        p {
-            font-size: 1.5rem;
-            margin: 5px 0;
+        h2 {
+            font-size: 1.4rem;
+            margin: 0 0 18px 0;
+            font-weight: 500;
+            opacity: 0.9;
         }
+        h3 {
+            font-size: 1.15rem;
+            margin: 0 0 10px 0;
+            color: #9be7ff;
+        }
+        p { margin: 6px 0; line-height: 1.5; }
         .status {
             display: inline-block;
-            padding: 10px 25px;
-            border-radius: 25px;
+            padding: 6px 18px;
+            border-radius: 20px;
             background-color: #27ae60;
-            font-size: 1.5rem;
-            font-weight: bold;
-            margin-top: 20px;
+            font-weight: 600;
+            margin: 6px 0 18px 0;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+            margin-top: 12px;
+        }
+        .model {
+            padding: 16px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .model .badge {
+            font-size: 0.75rem;
+            background: #1abc9c;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 6px;
+        }
+        code {
+            background: rgba(0, 0, 0, 0.35);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        ul { margin: 6px 0 6px 18px; padding: 0; }
+        li { margin: 3px 0; }
+        a { color: #9be7ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .footer {
+            text-align: center;
+            opacity: 0.7;
+            font-size: 0.85rem;
+            margin-top: 12px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>VxThinkingLLM</h1>
-        <p>Vector-Augmented Local Language Model</p>
-        <div class="status">Online</div>
+    <div class="wrap">
+        <div class="card">
+            <h1>VxThinkingLLM</h1>
+            <h2>ProdxCloud Multi-Model Platform — 3 Specialists + 1 Reasoning Core</h2>
+            <span class="status">Online</span>
+            <p>Sovereign, fine-tuned local LLMs for cloud operations, code, and IT support — grounded in your own data via FAISS vector search and chain-of-thoughts reasoning.</p>
+        </div>
+
+        <div class="card">
+            <h3>Models</h3>
+            <div class="grid">
+                <div class="model"><strong>VxThinking v1.2</strong><span class="badge">core</span>
+                    <p>RAG + planning + reasoning. Powers <code>/generate</code>, <code>/api/models/v1/*</code>, <code>/api/models/v2/*</code>, <code>/api/models/v3/*</code>.</p>
+                </div>
+                <div class="model"><strong>VxCloud v1.0</strong><span class="badge">cloud</span>
+                    <p>Terraform / Kubernetes / SRE. Mounted at <code>/v1/cloud/*</code>.</p>
+                </div>
+                <div class="model"><strong>VxCoder v1.0</strong><span class="badge">coding</span>
+                    <p>Code gen, multi-file edits, PR review. Mounted at <code>/v1/coding/*</code>.</p>
+                </div>
+                <div class="model"><strong>VxSupport v1.0</strong><span class="badge">support</span>
+                    <p>Docs Q&amp;A, runbooks, Jira-style tickets. Mounted at <code>/v1/support/*</code>.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Quick Endpoints</h3>
+            <ul>
+                <li><code>GET&nbsp; /health</code> — liveness check</li>
+                <li><code>POST /v1/ask</code> — universal dispatcher (auto-routes to the right specialist)</li>
+                <li><code>GET&nbsp; /v1/ask/routes</code> — inspect the routing table</li>
+                <li><code>POST /generate</code> — VxThinking direct generation</li>
+                <li><code>POST /search</code> — FAISS vector similarity search</li>
+                <li><code>POST /api/cloud/provision-intent</code> — intent + Golang payload for the provisioning agent</li>
+                <li><a href="/docs">/docs</a> — full OpenAPI / Swagger UI</li>
+                <li><a href="/redoc">/redoc</a> — ReDoc API reference</li>
+            </ul>
+        </div>
+
+        <div class="footer">VxThinkingLLM v1.2 · Built for ProdxCloud · <a href="/docs">API Docs</a></div>
     </div>
 </body>
 </html>
@@ -1054,6 +1153,7 @@ class GenerateRequest(BaseModel):
     max_new_tokens: int = 200
     temperature: float = 0.7
     top_p: float = 0.9
+    enrich_with_web: bool = False  # if True, prepend web-search context
 
 
 class GenerateResponse(BaseModel):
@@ -1061,6 +1161,7 @@ class GenerateResponse(BaseModel):
     text: str  # Alias for LangChain compatibility
     model_loaded: bool
     device: str
+    web: Optional[Dict[str, Any]] = None  # populated when enrich_with_web=True
 
 
 class SearchRequest(BaseModel):
@@ -1107,9 +1208,35 @@ async def generate(request: GenerateRequest, req: Request):
     
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"LLM input: {request.prompt}")
-        inputs = tokenizer(request.prompt, return_tensors="pt").to(device)
-        
+
+        # Optional web enrichment: search the web and prepend the result as context.
+        # This is the fallback path the user asked for — when local FAISS / weights
+        # don't have the answer, VxThinking can pull live context from the web.
+        prompt_text = request.prompt
+        web_meta = None
+        if request.enrich_with_web:
+            try:
+                from app.services.web import fetch_external_context
+            except ImportError:
+                from services.web import fetch_external_context
+            web_out = await fetch_external_context(request.prompt)
+            web_meta = {
+                "sources": web_out.get("sources", []),
+                "chars": len(web_out.get("context", "")),
+                "errors": web_out.get("errors", []),
+            }
+            if web_out.get("context"):
+                prompt_text = (
+                    "Use the following web sources to answer the user's question. "
+                    "Cite the URL of each fact you use.\n\n"
+                    f"{web_out['context']}\n\n"
+                    "---\n\n"
+                    f"User question: {request.prompt}"
+                )
+
+        logger.info(f"LLM input: {prompt_text[:200]}")
+        inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
+
         with torch.no_grad():
             output = model.generate(
                 **inputs,
@@ -1119,15 +1246,16 @@ async def generate(request: GenerateRequest, req: Request):
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id
             )
-        
+
         generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
         logger.info(f"LLM output: {generated_text}")
-        
+
         response_data = GenerateResponse(
             response=generated_text,
             text=generated_text,  # For LangChain compatibility
             model_loaded=True,
-            device=device
+            device=device,
+            web=web_meta,
         )
         
         # Save to database

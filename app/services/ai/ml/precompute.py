@@ -1,9 +1,9 @@
 """
-VaLLM Precompute Script - Build FAISS Index from Multi-Format Data
+VaLLM Precompute Script - Build FAISS Index from Multi-Format Data (ThinkingLLM)
 
-This script reads all supported files from app/data/datasets/ and generates
-embeddings using sentence-transformers, saving a FAISS index to
-app/data/vectorstore/.
+This script reads all supported files from app/data/datasets/thinkingllm/ and
+generates embeddings using sentence-transformers, saving a FAISS index to
+app/data/precompute/thinkingllm/.
 
 SUPPORTED FORMATS:
 ==================
@@ -26,10 +26,10 @@ QUICK START (run from va_llm_v1 root directory):
     # Start the FastAPI server
     python -m app.app
 
-INPUT (datasets):  app/data/datasets/  (*.csv, *.json, *.txt, *.pdf, *.sql, *.xlsx, *.xls)
+INPUT (datasets):  app/data/datasets/thinkingllm/  (*.csv, *.json, *.txt, *.pdf, *.sql, *.xlsx, *.xls)
 OUTPUT:
 =======
-    app/data/vectorstore/
+    app/data/precompute/thinkingllm/
         faiss_index.bin    - FAISS vector index (IndexFlatIP, cosine similarity)
         documents.pkl      - Original documents + metadata
 """
@@ -97,13 +97,34 @@ def row_to_text(row: Dict[str, Any]) -> str:
     # Deployment rows: prompt-focused embedding
     if prompt and intent:
         parts = [prompt, f"intent: {intent}"]
+
+        # Pull the executable command out of `path` (raw column) AND/OR
+        # `action_json.command` so semantic search can match on command
+        # similarity, not just prompt phrasing.
+        path_val = _clean(row.get("path"))
+        if path_val:
+            parts.append(f"command: {path_val}")
+        action_json_raw = _clean(row.get("action_json"))
+        if action_json_raw:
+            try:
+                aj = json.loads(action_json_raw)
+                aj_cmd = _clean(aj.get("command")) or _clean(aj.get("path"))
+                if aj_cmd and aj_cmd != path_val:
+                    parts.append(f"command: {aj_cmd}")
+                aj_explanation = _clean(aj.get("explanation"))
+                if aj_explanation:
+                    parts.append(f"explanation: {aj_explanation}")
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass  # action_json may not be valid JSON in some rows; ignore
+
         # Add key fields per intent type to sharpen discrimination
         for field in ("instance_type", "cloud_provider", "region", "os",
                       "cluster_name", "node_count", "node_type", "kubernetes_version",
                       "docker_image", "container_name", "ports",
                       "database_engine", "database_name",
                       "app_name", "app_port",
-                      "server_name", "http_port"):
+                      "server_name", "http_port",
+                      "tags", "category"):
             val = _clean(row.get(field))
             if val:
                 parts.append(f"{field}: {val}")
@@ -363,20 +384,20 @@ def main() -> None:
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(Path("app") / "data" / "datasets" / "cloud_deployments.csv"),
+        default=str(Path("app") / "data" / "datasets" / "thinkingllm" / "cloud_deployments.csv"),
         help="Primary dataset file (used first if --dataset-dir is set)",
     )
     parser.add_argument(
         "--dataset-dir",
         type=str,
-        default=str(Path("app") / "data" / "datasets"),
+        default=str(Path("app") / "data" / "datasets" / "thinkingllm"),
         help="If set, embed all supported files in this folder (recommended)",
     )
     parser.add_argument(
         "--file-types",
         type=str,
-        default="csv,json,txt,pdf,sql,xlsx,xls",
-        help="Comma-separated list of file types to include (default: csv,json,txt,pdf,sql,xlsx,xls)",
+        default="csv,json,txt,md,pdf,sql,xlsx,xls",
+        help="Comma-separated list of file types to include (default: csv,json,txt,md,pdf,sql,xlsx,xls)",
     )
     parser.add_argument(
         "--embedding-model",
@@ -387,7 +408,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=str(Path("app") / "data" / "vectorstore"),
+        default=str(Path("app") / "data" / "precompute" / "thinkingllm"),
         help="Directory where faiss_index.bin and documents.pkl will be written",
     )
     parser.add_argument("--batch-size", type=int, default=128)
@@ -486,6 +507,20 @@ def main() -> None:
                     print(f"\n[{global_idx}/{total_files}] TXT: {p.name}")
                     rows = load_txt_rows(p)
                     file_counts["txt"] = file_counts.get("txt", 0) + 1
+                    print(f"    [OK] Loaded {len(rows)} chunk(s)")
+                    for row in rows:
+                        all_rows.append((row, str(p), False))
+                except Exception as e:
+                    print(f"    [WARN] Could not parse: {e}")
+
+        # --- MD --- (reuses the TXT loader; it already splits by markdown headers)
+        if "md" in files_by_type:
+            for p in files_by_type["md"]:
+                global_idx += 1
+                try:
+                    print(f"\n[{global_idx}/{total_files}] MD: {p.name}")
+                    rows = load_txt_rows(p)
+                    file_counts["md"] = file_counts.get("md", 0) + 1
                     print(f"    [OK] Loaded {len(rows)} chunk(s)")
                     for row in rows:
                         all_rows.append((row, str(p), False))

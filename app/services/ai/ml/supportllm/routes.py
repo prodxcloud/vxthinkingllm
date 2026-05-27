@@ -25,6 +25,12 @@ class SupportQueryRequest(BaseModel):
     max_new_tokens: int = Field(500, ge=16, le=2048)
     temperature: float = Field(0.2, ge=0.0, le=2.0)
     top_p: float = Field(0.9, ge=0.0, le=1.0)
+    enrich_with_web: bool = Field(
+        False,
+        description="If True, fetch external context (web search + scrape) and "
+                    "prepend it to the prompt before generation. Used when local "
+                    "docs don't have the answer.",
+    )
 
 
 class TicketRequest(BaseModel):
@@ -66,14 +72,39 @@ async def health(req: Request) -> Dict[str, Any]:
 async def generate(request: SupportQueryRequest, req: Request) -> Dict[str, Any]:
     backend = _get_backend(req)
     start = time.perf_counter()
+
+    prompt = request.prompt
+    web_meta: Optional[Dict[str, Any]] = None
+    if request.enrich_with_web:
+        try:
+            from app.services.web import fetch_external_context
+        except ImportError:
+            from services.web import fetch_external_context
+        web_out = await fetch_external_context(request.prompt)
+        web_meta = {
+            "sources": web_out.get("sources", []),
+            "chars": len(web_out.get("context", "")),
+            "errors": web_out.get("errors", []),
+        }
+        if web_out.get("context"):
+            prompt = (
+                "Use the following web sources to answer the user's question. "
+                "Cite the URL of each fact you use.\n\n"
+                f"{web_out['context']}\n\n"
+                "---\n\n"
+                f"User question: {request.prompt}"
+            )
+
     result = backend.generate(
-        prompt=request.prompt,
+        prompt=prompt,
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
         top_p=request.top_p,
         context=request.context,
     )
     result["duration_ms"] = (time.perf_counter() - start) * 1000
+    if web_meta is not None:
+        result["web"] = web_meta
     return result
 
 

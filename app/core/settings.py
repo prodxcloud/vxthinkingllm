@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     vector_db_type: str = "faiss"
     chroma_host: str = "localhost"
     chroma_port: int = 8001
-    faiss_index_path: str = "./app/data/vectorstore"
+    faiss_index_path: str = "./app/data/precompute/thinkingllm"
     
     # AI Model Configuration
     embedding_model: str = "all-MiniLM-L6-v2"

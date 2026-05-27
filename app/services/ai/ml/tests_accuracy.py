@@ -117,40 +117,40 @@ class TestAllIntentPayloads(unittest.TestCase):
         self._test_payload("provision_fastapi", raw, ["hostname", "app_name", "app_port", "http_port"])
 
     def test_provision_static_website(self):
-        raw = {"hostname": "docs.example.com", "server_name": "docs.example.com", "http_port": "80"}
+        raw = {"hostname": "docs.vxcloud.io", "server_name": "docs.vxcloud.io", "http_port": "80"}
         self._test_payload("provision_static_website", raw, ["hostname", "server_name", "http_port"])
 
     def test_provision_nextjs(self):
-        raw = {"hostname": "web.example.com", "app_name": "nextjs-app-1", "app_port": "3000",
+        raw = {"hostname": "web.vxcloud.io", "app_name": "nextjs-app-1", "app_port": "3000",
                "http_port": "80", "runtime_version": "18", "repo_url": "https://github.com/org/app.git"}
         self._test_payload("provision_nextjs", raw, ["hostname", "app_name", "app_port", "framework", "node_version"])
 
     def test_provision_django(self):
-        raw = {"hostname": "app.example.com", "app_name": "django-app-1", "app_port": "8000",
+        raw = {"hostname": "app.vxcloud.io", "app_name": "django-app-1", "app_port": "8000",
                "http_port": "80", "database_engine": "postgres", "runtime_version": "3.12"}
         self._test_payload("provision_django", raw,
                            ["hostname", "app_name", "app_port", "framework", "python_version", "database_engine"])
 
     def test_provision_reactjs(self):
-        raw = {"hostname": "web.example.com", "app_name": "react-app-1", "app_port": "8080",
+        raw = {"hostname": "web.vxcloud.io", "app_name": "react-app-1", "app_port": "8080",
                "http_port": "80", "runtime_version": "22", "repo_url": "https://github.com/org/app.git"}
         self._test_payload("provision_reactjs", raw, ["hostname", "app_name", "app_port", "framework", "node_version"])
 
     def test_provision_monitoring(self):
-        raw = {"hostname": "mon.example.com", "monitoring_tool": "prometheus", "monitoring_port": "9090"}
+        raw = {"hostname": "mon.vxcloud.io", "monitoring_tool": "prometheus", "monitoring_port": "9090"}
         self._test_payload("provision_monitoring", raw, ["hostname", "monitoring_tool", "monitoring_port"])
 
     def test_provision_elk(self):
-        raw = {"hostname": "elk.example.com", "elk_version": "8.12.0", "es_port": "9200",
+        raw = {"hostname": "elk.vxcloud.io", "elk_version": "8.12.0", "es_port": "9200",
                "kibana_port": "5601", "logstash_port": "5044"}
         self._test_payload("provision_elk", raw, ["hostname", "elk_version", "es_port", "kibana_port"])
 
     def test_provision_vpn(self):
-        raw = {"hostname": "vpn.example.com", "vpn_protocol": "wireguard", "vpn_port": "51820", "vpn_clients": "20"}
+        raw = {"hostname": "vpn.vxcloud.io", "vpn_protocol": "wireguard", "vpn_port": "51820", "vpn_clients": "20"}
         self._test_payload("provision_vpn", raw, ["hostname", "vpn_protocol", "vpn_port", "vpn_clients"])
 
     def test_provision_cicd(self):
-        raw = {"hostname": "cicd.example.com", "cicd_tool": "jenkins", "cicd_port": "8080",
+        raw = {"hostname": "cicd.vxcloud.io", "cicd_tool": "jenkins", "cicd_port": "8080",
                "docker_image": "jenkins/jenkins:lts"}
         self._test_payload("provision_cicd", raw, ["hostname", "cicd_tool", "cicd_port"])
 
@@ -162,7 +162,7 @@ class TestAllIntentPayloads(unittest.TestCase):
                            ["database_engine", "database_name", "db_instance_class", "storage_size_gb"])
 
     def test_provision_cache(self):
-        raw = {"hostname": "cache.example.com", "cache_engine": "redis", "cache_port": "6379",
+        raw = {"hostname": "cache.vxcloud.io", "cache_engine": "redis", "cache_port": "6379",
                "cache_size_mb": "512", "replicas": "1"}
         self._test_payload("provision_cache", raw, ["hostname", "cache_engine", "cache_port", "cache_size_mb"])
 
@@ -172,20 +172,20 @@ class TestAllIntentPayloads(unittest.TestCase):
         self._test_payload("provision_storage", raw, ["storage_backend", "bucket_name", "storage_size_gb"])
 
     def test_provision_ssl(self):
-        raw = {"hostname": "secure.example.com", "domain_name": "secure.example.com", "ssl_provider": "letsencrypt"}
+        raw = {"hostname": "secure.vxcloud.io", "domain_name": "secure.vxcloud.io", "ssl_provider": "letsencrypt"}
         self._test_payload("provision_ssl", raw, ["hostname", "domain_name", "ssl_provider"])
 
     def test_provision_loadbalancer(self):
-        raw = {"hostname": "lb.example.com", "lb_type": "nginx", "lb_algorithm": "round-robin"}
+        raw = {"hostname": "lb.vxcloud.io", "lb_type": "nginx", "lb_algorithm": "round-robin"}
         self._test_payload("provision_loadbalancer", raw, ["hostname", "lb_type", "lb_algorithm"])
 
     def test_provision_wordpress(self):
-        raw = {"hostname": "blog.example.com", "app_name": "wordpress", "http_port": "80",
+        raw = {"hostname": "blog.vxcloud.io", "app_name": "wordpress", "http_port": "80",
                "database_engine": "mysql"}
         self._test_payload("provision_wordpress", raw, ["hostname", "app_name", "http_port", "database_engine"])
 
     def test_provision_springboot(self):
-        raw = {"hostname": "api.example.com", "app_name": "springboot-api", "app_port": "8080",
+        raw = {"hostname": "api.vxcloud.io", "app_name": "springboot-api", "app_port": "8080",
                "http_port": "80", "runtime_version": "17", "repo_url": "https://github.com/org/app.git"}
         self._test_payload("provision_springboot", raw, ["hostname", "app_name", "app_port", "framework", "java_version"])
 
@@ -194,7 +194,7 @@ class TestAllIntentPayloads(unittest.TestCase):
         self._test_payload("provision_serverless", raw, ["function_name", "runtime", "cloud_provider"])
 
     def test_provision_cdn(self):
-        raw = {"distribution_name": "my-cdn", "origin": "origin.example.com", "cloud_provider": "aws"}
+        raw = {"distribution_name": "my-cdn", "origin": "origin.vxcloud.io", "cloud_provider": "aws"}
         self._test_payload("provision_cdn", raw, ["distribution_name", "origin", "cloud_provider"])
 
     def test_provision_network(self):
@@ -333,7 +333,7 @@ class TestEntityExtractionAccuracy(unittest.TestCase):
         self._check("Deploy FastAPI on api.staging.mycompany.com", {"hostname": "api.staging.mycompany.com"})
 
     def test_hostname_simple(self):
-        self._check("Host website on docs.example.com", {"hostname": "docs.example.com"})
+        self._check("Host website on docs.vxcloud.io", {"hostname": "docs.vxcloud.io"})
 
     # Port extraction
     def test_port_mapping(self):
@@ -426,7 +426,7 @@ class TestPayloadCompleteness(unittest.TestCase):
                              ["storage_backend", "bucket_name", "storage_size_gb"])
 
     def test_ssl_defaults(self):
-        self._check_complete("provision_ssl", {"username": "test", "hostname": "secure.example.com"}, {},
+        self._check_complete("provision_ssl", {"username": "test", "hostname": "secure.vxcloud.io"}, {},
                              ["ssl_provider"])
 
     def test_loadbalancer_defaults(self):

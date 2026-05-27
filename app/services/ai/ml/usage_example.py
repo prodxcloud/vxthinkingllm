@@ -71,7 +71,7 @@ PROVISION_EXAMPLES: List[Dict[str, Any]] = [
     },
     {
         "name": "Provision Static Website",
-        "query": "Host a static website for docs.example.com on nginx with port 80",
+        "query": "Host a static website for docs.vxcloud.io on nginx with port 80",
         "expected_intent": "provision_static_website",
         "expected_keys": ["server_name", "http_port"],
     },

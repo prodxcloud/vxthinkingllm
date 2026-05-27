@@ -54,7 +54,11 @@ def build_supportllm_config(device: str = "cuda") -> SpecialistConfig:
             "SUPPORTLLM_PRECOMPUTE_DIR",
             "app/data/precompute/supportllm",
         ),
-        fallback_base_model="Qwen/Qwen2.5-0.5B-Instruct",
+        # Tiny safety-net only — used when fine-tuned VxSupport weights at
+        # `model_path` are missing/corrupt. distilgpt2 is ~82M params (vs
+        # Qwen 0.5B = 500M, ~6× larger), loads in seconds, and stays out of
+        # the way once the fine-tuned model is in place.
+        fallback_base_model="distilgpt2",
         system_prompt=SUPPORTLLM_SYSTEM_PROMPT,
         device=device,
         prefix="/v1/support",

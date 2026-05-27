@@ -85,7 +85,7 @@ class EntityExtractor:
             (r'\b(?:gcp|google\s*cloud|gke|gce|cloud\s*run|bigquery|compute\s*engine)\b', 'gcp'),
             (r'\b(?:azure|microsoft\s*azure|aks|azure\s*vm|azure\s*sql)\b', 'azure'),
             (r'\b(?:digitalocean|droplet|doks)\b', 'digitalocean'),
-            (r'\b(?:valtunox)\b', 'valtunox'),
+            (r'\b(?:vxcloud)\b', 'vxcloud'),
         ]
 
         # Database engine detection patterns
@@ -447,7 +447,7 @@ def extract_entities_from_query(query: str) -> Dict[str, Any]:
 if __name__ == "__main__":
     # Test cases
     test_queries = [
-        "Deploy static website to nginx on docs.example.com, port 80",
+        "Deploy static website to nginx on docs.vxcloud.io, port 80",
         "Deploy FastAPI app billing-api, port 8000, http port 80", 
         "Create an EKS cluster, 3 nodes, m5.large, kubernetes 1.29 in us-east-1",
         "Deploy PostgreSQL database, version 16, name analytics_db, user admin",

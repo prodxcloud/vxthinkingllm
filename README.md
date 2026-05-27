@@ -1,548 +1,300 @@
-# VaLLM: Sovereign AI for Cloud Operations
+# VxThinkingLLM — ProdxCloud Multi-Model Platform (3 + 1)
 
-> **Mission**: A private, production-grade AI reasoning engine that understands *your* specific cloud infrastructure. Unlike generic LLMs, VaLLM is grounded in your actual production data (logs, resources, configurations) and provides DevOps intelligence without data leaving your network.
+> **Mission**: A sovereign, production-grade AI platform that ships **three fine-tuned specialist LLMs** (cloud, code, support) coordinated by **one reasoning core** (VxThinking). Grounded in *your* private data via FAISS vector search and chain-of-thoughts reasoning — no external API calls, no data leaving your network.
 
 ---
 
 ## Table of Contents
 
+- [The 3 + 1 Models](#the-3--1-models)
 - [Architecture](#architecture)
-- [Features](#features)
 - [Quick Start](#quick-start)
+- [Training the Models](#training-the-models)
 - [Deployment](#deployment)
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
-- [Monitoring](#monitoring)
 - [Project Structure](#project-structure)
-- [Data Management](#data-management)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## The 3 + 1 Models
+
+VxThinkingLLM bundles four cooperating models. The **+1 core** does retrieval, planning, and reasoning; the **3 specialists** are fine-tuned causal LMs each focused on one job. A universal `/v1/ask` dispatcher classifies prompts and forwards them to the right backend.
+
+| Model | Role | Base / Arch | Fine-tuned on | Routes |
+|-------|------|-------------|---------------|--------|
+| **VxThinking v1.2** *(core)* | RAG + planning + chain-of-thought reasoning, ticket/sprint/forecast intelligence. Powers the FAISS-backed RAG endpoints. | GPT-2 (6 layers, 768 hidden, 50 257 vocab) — `app/data/models/thinkingllm/` | Your CSVs/text under `app/data/datasets/thinkingllm/` | `/generate`, `/api/models/v1/*`, `/api/models/v2/*`, `/api/models/v3/*`, `/api/cloud/provision-intent` |
+| **VxCloud v1.0** | DevOps / IaC / SRE specialist — Terraform, Kubernetes, Helm, Ansible, runbooks, cost optimization. Hard rule: every security-relevant line is annotated, K8s manifests always include `resources.limits`, IAM is least-privilege. | Qwen2 0.5B (24 layers, 896 hidden, 151 936 vocab) — `app/data/models/cloudllm/` | `app/data/datasets/cloudllm/` | `/v1/cloud/*` |
+| **VxCoder v1.0** | Code generation, multi-file edits via XML SEARCH/REPLACE diffs, PR review, test writing (pytest / vitest). | Qwen2 0.5B — `app/data/models/codingllm/` (fallback `Qwen/Qwen2.5-0.5B-Instruct`) | `app/data/datasets/codingllm/` (generator: `scripts/gen_codingllm_dataset.py`) | `/v1/coding/*` |
+| **VxSupport v1.0** | IT support / docs Q&A / runbook lookup / Jira-style ticket auto-answer. Always answers in **Diagnosis → Steps → Verify → Escalate** format with cited sources. | Qwen2 0.5B — `app/data/models/supportllm/` (fallback `Qwen/Qwen2.5-0.5B-Instruct`) | `app/data/datasets/supportllm/` (generator: `scripts/gen_supportllm_dataset.py`) | `/v1/support/*` |
+
+Each specialist gracefully **falls back** to its base HF model if no fine-tuned weights are present, so every route is reachable from a clean checkout.
 
 ---
 
 ## Architecture
 
-VaLLM uses a hybrid **RAG (Retrieval-Augmented Generation) + Deterministic Reasoning** architecture.
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    User / Application                        │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTP Request
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              FastAPI Gateway (app.py)                        │
-│  ├─ Rate Limiting        ├─ Metrics Collection              │
-│  ├─ Request Logging      └─ Circuit Breaker                 │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-    ┌─────────┐    ┌──────────┐    ┌──────────┐
-    │ /search │    │ /api/v1  │    │ /api/v2  │
-    └────┬────┘    └────┬─────┘    └────┬─────┘
-         │              │               │
-         ▼              ▼               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    VectorStore (FAISS)                       │
-│  ├─ Embedding Model: all-MiniLM-L6-v2 (384-dim)             │
-│  ├─ L1 Cache: Embeddings (TTL 1h)                           │
-│  └─ L2 Cache: Search Results (TTL 30m)                      │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              ReasoningEngine (reasoning.py)                  │
-│  Search → Analyze → Synthesize → Decide                      │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        Client / Agent                             │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │ HTTP
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  FastAPI gateway  (app/app.py)                                   │
+│  ─ logging, request-id, CORS, rate-limit, metrics ─              │
+└─┬──────────────┬─────────────┬─────────────┬─────────────┬───────┘
+  │              │             │             │             │
+  ▼              ▼             ▼             ▼             ▼
+/v1/ask     /generate     /v1/cloud     /v1/coding    /v1/support
+universal   VxThinking    VxCloud       VxCoder       VxSupport
+dispatcher    + RAG       (Qwen2)       (Qwen2)       (Qwen2)
+                  │
+                  ▼
+        FAISS index (all-MiniLM-L6-v2)
+        L1 embeddings cache · L2 search cache
+                  │
+                  ▼
+        ReasoningEngine (search → analyze → synthesize → decide)
 ```
 
-### Core Components
-
-| Component | Description |
-|-----------|-------------|
-| **VectorStore** | FAISS-based semantic search with sentence-transformers embeddings |
-| **ReasoningEngine** | Multi-step chain-of-thought reasoning for cloud operations |
-| **Cache** | Multi-level TTL caching (embeddings L1, search results L2) |
-| **Metrics** | Prometheus metrics for observability |
-| **Health** | Kubernetes-compatible readiness/liveness probes |
-
----
-
-## Features
-
-- **Semantic Search**: Query infrastructure knowledge using natural language
-- **Chain-of-Thought Reasoning**: Multi-step analysis with confidence scoring
-- **Multi-Cloud Support**: AWS, Azure, GCP, and Kubernetes intelligence
-- **100% Offline**: No external API calls required - full data sovereignty
-- **Production Ready**: Rate limiting, circuit breaker, structured logging
-- **Observable**: Prometheus metrics, Grafana dashboards, health probes
-- **Scalable**: Docker Compose, Kubernetes (AKS), horizontal scaling
+The 3 specialists share `SpecialistBackend` (`app/services/ai/ml/specialist_base.py`) so load + generate behavior is identical line-for-line; the only per-model differences are **path**, **fallback base model**, and **system prompt**.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- Docker and Docker Compose (recommended)
-- 4GB+ RAM
-
-### Option 1: Docker Compose (Recommended)
-
 ```bash
-# Clone and navigate to project
-cd va_llm_v1
-
-# Start full stack (API + Redis + Prometheus + Grafana)
-docker-compose up -d
-
-# Check status
-docker-compose ps
-```
-
-Services will be available at:
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000
-
-### Option 2: Local Development
-
-```bash
-# Create virtual environment
+# 1. Install
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate            # or .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
-# Run the service
+# 2. Run (auto-precompute + auto-train kick in if data is present)
 python -m app.app
+# → http://localhost:8745
 ```
 
-The service will:
-1. Download embedding model (first run only, ~80MB)
-2. Auto-build FAISS index if not present (when `VALLM_AUTO_PRECOMPUTE=true`)
-3. Start API server on http://localhost:8000
-
-### Test the API
+Welcome page: <http://localhost:8745/> · OpenAPI: <http://localhost:8745/docs> · ReDoc: <http://localhost:8745/redoc>
 
 ```bash
-# Health check
-curl http://localhost:8000/health
+# 3. Smoke-test all four models
+python scripts/smoke_test_specialists.py
+python scripts/smoke_test_two.py
 
-# Query endpoint
-curl -X POST http://localhost:8000/api/model/v1/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Why are IAM access keys not rotated in 90 days?",
-    "top_k": 5,
-    "include_reasoning": true
-  }'
-
-# Developer endpoint (Terraform generation)
-curl -X POST http://localhost:8000/api/model/v1/developer \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Create Terraform config for EKS cluster",
-    "include_code": true
-  }'
+# 4. Try the universal dispatcher
+curl -s http://localhost:8745/v1/ask \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Write a Terraform module for an S3 bucket with KMS"}' | jq .
 ```
+
+---
+
+## Training the Models
+
+Each model has its own `train.py` and dataset directory.
+
+```bash
+# Generate synthetic specialist datasets (run once)
+python scripts/gen_codingllm_dataset.py
+python scripts/gen_supportllm_dataset.py
+
+# Train each model
+python -m app.services.ai.ml.train                    # VxThinking core
+python -m app.services.ai.ml.cloudllm.train           # VxCloud
+python -m app.services.ai.ml.codingllm.train          # VxCoder
+python -m app.services.ai.ml.supportllm.train         # VxSupport
+
+# Build the FAISS index for VxThinking RAG
+python -m app.services.ai.ml.precompute
+```
+
+**Auto-train** is on by default — if `app/data/models/thinkingllm/config.json` is missing on startup and a dataset is present, training launches automatically (set `VxThinkingLLM_AUTO_TRAIN=false` to disable).
 
 ---
 
 ## Deployment
 
-### Docker
-
 ```bash
-# Build image
-docker build -t vallm:latest .
+# Single node (dev)
+python -m app.app
 
-# Run container
-docker run -p 8000:8000 -v $(pwd)/app/data:/app/data vallm:latest
+# Production (uvicorn)
+uvicorn app.app:app --host 0.0.0.0 --port 8745 --workers 4
+
+# Docker
+docker compose up -d
+# or
+docker build -t vxthinkingllm:latest . && docker run -p 8745:8745 vxthinkingllm:latest
 ```
 
-### Docker Compose (Full Stack)
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f vallm
-
-# Stop all services
-docker-compose down
-```
-
-**Included Services**:
-- `vallm`: FastAPI application (port 8000)
-- `redis`: Caching layer (port 6379)
-- `prometheus`: Metrics collection (port 9090)
-- `grafana`: Metrics visualization (port 3000)
-
-### Kubernetes (AKS)
-
-Manifests are in `deployment/kubernetes/`:
-
-```bash
-# Apply manifests
-kubectl apply -f deployment/kubernetes/
-
-# Check deployment
-kubectl get pods -l app=vallm
-```
-
-See `deployment.md` for detailed instructions.
-
-### CI/CD
-
-**GitHub Actions** (`.github/workflows/data-pipeline.yml`):
-- Linting and testing
-- Docker build and push
-- Deploy to VM or Kubernetes
-
-**Azure Pipelines** (`azure-pipelines.yml`):
-- Build and push to Azure Container Registry
-- Deploy to VM via SSH
-- Deploy to AKS
+GPU is auto-detected (`USE_CUDA=true` to force). All four models share the device chosen at startup.
 
 ---
 
 ## API Reference
 
-### Core Endpoints
+> **Tip:** the universal `POST /v1/ask` endpoint will pick the right model for you. Use the per-model endpoints below when you need fine control over parameters or specialist-specific request shapes.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | HTML status page |
-| GET | `/health` | Basic health check |
-| GET | `/health/ready` | Readiness probe (K8s) |
-| GET | `/health/live` | Liveness probe (K8s) |
-| GET | `/metrics` | Prometheus metrics |
-| GET | `/docs` | OpenAPI documentation |
-| POST | `/search` | Vector similarity search |
-| POST | `/generate` | Text generation (if model loaded) |
+### Platform — system
 
-### V1 Endpoints - RAG + Reasoning
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/` | HTML welcome page (model overview + quick links) |
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/stats` | Vector store + cache statistics |
+| `GET` | `/logs` | Recent log lines (`?lines=50`) |
+| `GET` | `/logs/stats` | Log counts (requests, responses, errors) |
+| `DELETE` | `/logs/clear` | Truncate the log file |
+| `GET` | `/docs` · `/redoc` | OpenAPI / ReDoc UIs |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/model/v1/query` | Main RAG query with reasoning |
-| POST | `/api/model/v1/developer` | Developer/Terraform assistance |
-| POST | `/api/model/v1/terminal` | CLI command assistance |
+### Platform — direct generation & search (VxThinking)
 
-**Example Request**:
-```json
-{
-  "query": "How do I provision an EC2 instance?",
-  "top_k": 5,
-  "include_reasoning": true,
-  "filter_type": "resource"
-}
-```
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/generate` | Direct text generation on the VxThinking core (LangChain-compatible response with `text` alias) |
+| `POST` | `/search` | FAISS vector similarity search (`{query, top_k}`) |
 
-### V2 Endpoints - NLP + Documents
+### VxThinking — V1 (RAG + reasoning)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/model/v2/query` | NLP-enhanced query with entity extraction |
-| POST | `/api/model/v2/upload` | Document/image upload for analysis |
-| POST | `/api/model/v2/extract` | Entity extraction from text |
-| GET | `/api/model/v2/status` | NLP capability status |
+Mounted at `/api/models/v1`.
 
-### V3 Endpoints - Incident Analysis
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/models/v1/query` | RAG query with chain-of-thought reasoning |
+| `POST` | `/api/models/v1/developer` | Developer assistance (RAG + code-oriented prompt) |
+| `POST` | `/api/models/v1/terminal` | Terminal / CLI assistance |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/model/v3/query` | Incident pattern detection |
+### VxThinking — V2 (NLP + document analysis)
+
+Mounted at `/api/models/v2`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/models/v2/query` | NLP-enhanced query (entity-aware) |
+| `POST` | `/api/models/v2/extract` | Entity extraction (spaCy, optional) |
+| `POST` | `/api/models/v2/upload` | Document / image upload (added to vector store) |
+| `GET` | `/api/models/v2/status` | NLP capability status |
+
+### VxThinking — V3 (incident patterns)
+
+Mounted at `/api/models/v3`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/models/v3/query` | Unusual cloud / DevOps incident-pattern detection with metrics |
+
+### Cloud provisioning bridge
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/cloud/provision-intent` | Returns intent classification + Golang payload for the provisioning agent. `query_type` ∈ `incidents \| cost \| billing \| security \| recommendations` |
+
+### VxCloud — `/v1/cloud`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/cloud/health` | Backend status, loaded model, device, paths |
+| `POST` | `/v1/cloud/generate` | Direct cloud-specialist generation |
+| `POST` | `/v1/cloud/query` | Generation + richer payload (`raw`, `loaded_from`, `duration_ms`) |
+
+### VxCoder — `/v1/coding`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/coding/health` | Backend status |
+| `POST` | `/v1/coding/generate` | Code generation (accepts `language`, `framework`) |
+| `POST` | `/v1/coding/edit` | Multi-file edit; returns XML SEARCH/REPLACE diffs |
+| `POST` | `/v1/coding/review` | Diff review (correctness · security · readability) |
+
+### VxSupport — `/v1/support`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/support/health` | Backend status |
+| `POST` | `/v1/support/generate` | Free-form support question |
+| `POST` | `/v1/support/ticket` | Answer a Jira-style ticket (`title`, `body`, `reporter`, `labels`) |
+| `POST` | `/v1/support/runbook` | Runbook lookup (Diagnosis → Steps → Verify → Escalate) |
+
+### Universal dispatcher — `/v1`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/ask` | Classifies the prompt and forwards to the right model. Use `force_model` to override (`thinkingllm \| cloudllm \| codingllm \| supportllm`) |
+| `GET` | `/v1/ask/routes` | Inspect the keyword routing table |
+
+### Monitoring — `/monitoring`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/monitoring/` · `/monitoring/health` · `/monitoring/status` | Service health and observability summary |
+| `GET` | `/monitoring/metrics` · `/monitoring/metrics/prometheus` · `/monitoring/metrics/json` | Prometheus / JSON metrics |
+| `POST` | `/monitoring/metrics/test` | Emit synthetic metrics |
+| `GET` | `/monitoring/performance` · `/current` · `/response-times` · `/errors` · `/history` | Performance counters |
+| `POST` | `/monitoring/performance/test` | Synthetic perf event |
+| `GET` | `/monitoring/logs` · `/stats` · `/errors` · `/warnings` · `/search` · `/tail` · `/info` · `/file` · `/file/download` | Log inspection |
+| `GET` | `/monitoring/observability/status` | Tracing / metrics backend status |
 
 ---
 
 ## Configuration
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VALLM_AUTO_PRECOMPUTE` | `true` | Auto-build FAISS index if missing |
-| `VALLM_AUTO_TRAIN` | `false` | Auto-train LLM model if missing |
-| `USE_CUDA` | `false` | Enable GPU acceleration |
-| `VALLM_JSON_LOGGING` | `false` | Enable structured JSON logging |
-| `VALLM_RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `VALLM_RATE_LIMIT_PER_MINUTE` | `60` | Max requests per minute per client |
-| `VALLM_CACHE_EMBEDDINGS` | `true` | Enable embedding cache (L1) |
-| `VALLM_CACHE_SEARCH` | `true` | Enable search result cache (L2) |
-| `ENVIRONMENT` | `production` | Deployment environment |
-| `PORT` | `8000` | API server port |
-| `REDIS_HOST` | `redis` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
-
-### GPU Support
-
-```bash
-# Enable CUDA
-export USE_CUDA=true
-
-# Install GPU-enabled FAISS
-pip uninstall faiss-cpu
-pip install faiss-gpu
-```
-
-### Changing the Embedding Model
-
-Edit `app/embeddings.py`:
-```python
-vector_store = VectorStore(
-    data_dir=data_dir,
-    model_name="all-mpnet-base-v2"  # Higher quality, larger model
-)
-```
-
----
-
-## Monitoring
-
-### Prometheus Metrics
-
-Available at `/metrics`:
-
-- `http_requests_total` - Request count by method/endpoint/status
-- `http_request_duration_seconds` - Request latency histogram
-- `vector_search_requests_total` - Vector search operations
-- `vector_search_duration_seconds` - Search latency
-- `cache_hits_total` / `cache_misses_total` - Cache effectiveness
-- `llm_generation_requests_total` - LLM generation operations
-
-### Grafana Dashboards
-
-Pre-configured dashboards in `monitoring/grafana/dashboards/`:
-- VaLLM Overview
-- API Performance
-- Cache Metrics
-- System Health
-
-Access Grafana at http://localhost:3000 (default: admin/admin)
-
-### Health Checks
-
-```bash
-# Basic health
-curl http://localhost:8000/health
-
-# Readiness (checks vector store, FAISS, memory)
-curl http://localhost:8000/health/ready
-
-# Liveness
-curl http://localhost:8000/health/live
-```
-
-### Logs
-
-```bash
-# View recent logs via API
-curl http://localhost:8000/logs
-
-# Log statistics
-curl http://localhost:8000/logs/stats
-
-# Docker logs
-docker-compose logs -f vallm
-```
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `VxThinkingLLM_AUTO_PRECOMPUTE` | `true` | Build FAISS index on startup if missing |
+| `VxThinkingLLM_AUTO_TRAIN` | `true` | Train VxThinking on startup if model is missing |
+| `USE_CUDA` | `false` | Use GPU for inference (auto-detected if available) |
+| `VxThinkingLLM_CACHE_EMBEDDINGS` | `true` | L1 embedding cache (TTL 1h) |
+| `VxThinkingLLM_CACHE_SEARCH` | `true` | L2 search cache (TTL 30m) |
+| `VxThinkingLLM_CACHE_EMBEDDINGS_MAXSIZE` | `2000` | L1 max entries |
+| `VxThinkingLLM_CACHE_SEARCH_MAXSIZE` | `1000` | L2 max entries |
+| `CLOUDLLM_MODEL_PATH` / `_DATASET_DIR` | `app/data/{models,datasets}/cloudllm` | Override VxCloud paths |
+| `CODINGLLM_MODEL_PATH` / `_DATASET_DIR` / `_PRECOMPUTE_DIR` | `app/data/{...}/codingllm` | Override VxCoder paths |
+| `SUPPORTLLM_MODEL_PATH` / `_DATASET_DIR` / `_PRECOMPUTE_DIR` | `app/data/{...}/supportllm` | Override VxSupport paths |
 
 ---
 
 ## Project Structure
 
 ```
-va_llm_v1/
-├── app/                          # Main application
-│   ├── app.py                    # FastAPI application
-│   ├── embeddings.py             # VectorStore (FAISS)
-│   ├── reasoning.py              # ReasoningEngine
-│   ├── routes.py                 # All API endpoints (v1, v2, v3)
-│   ├── precompute.py             # Build FAISS index
-│   ├── train.py                  # LLM fine-tuning
-│   ├── cache.py                  # Multi-level caching
-│   ├── circuit_breaker.py        # Resilience pattern
-│   ├── exceptions.py             # Custom exceptions
-│   ├── health.py                 # Health check endpoints
-│   ├── logging_config.py         # Structured logging
-│   ├── metrics.py                # Prometheus metrics
-│   ├── rate_limit.py             # Rate limiting
-│   ├── data/                     # Data directory
-│   │   ├── *.csv                 # Knowledge base files
-│   │   ├── *.pdf                 # PDF documents
-│   │   ├── vectorstore/          # FAISS index artifacts
-│   │   └── model/                # Trained model artifacts
-│   └── tests/                    # Test files
-├── deployment/                   # Deployment configs
-│   ├── kubernetes/               # K8s manifests
-│   └── vm/                       # VM deployment
-├── monitoring/                   # Monitoring stack
-│   ├── prometheus.yml            # Prometheus config
-│   └── grafana/                  # Grafana dashboards
-├── scripts/                      # Utility scripts
-├── Dockerfile                    # Container image
-├── docker-compose.yml            # Full stack setup
-├── requirements.txt              # Python dependencies
-├── azure-pipelines.yml           # Azure DevOps CI/CD
-└── .github/workflows/            # GitHub Actions CI/CD
-```
-
----
-
-## Data Management
-
-### Knowledge Base Location
-
-All data is in `app/data/`:
-- `*.csv` - Structured knowledge (resources, incidents, recommendations)
-- `*.pdf` - DevOps documentation
-- `*.json` - Configuration data
-- `vectorstore/` - FAISS index and document metadata
-
-### Building the Index
-
-```bash
-# Standard precompute
-python -m app.precompute
-
-# Check index status
-python -m app.precompute --action check
-```
-
-### Expanding the Dataset
-
-```bash
-# Generate synthetic data
-python scripts/massive_data_expansion.py
-
-# Rebuild index after adding data
-python -m app.precompute
-```
-
-### LLM Fine-Tuning (Optional)
-
-```bash
-# Train on CSV data
-python -m app.train --num-train-epochs 1
-
-# Model saved to app/data/model/
+VxThinkingLLM/
+├── app/
+│   ├── app.py                             # FastAPI gateway (lifespan, routers, welcome page)
+│   ├── core/                              # settings, logging
+│   ├── data/
+│   │   ├── datasets/{thinkingllm,cloudllm,codingllm,supportllm}/
+│   │   ├── models/{thinkingllm,cloudllm,codingllm,supportllm}/
+│   │   └── precompute/{thinkingllm,codingllm,supportllm}/
+│   └── services/
+│       ├── ai/ml/
+│       │   ├── embeddings.py              # FAISS + sentence-transformers
+│       │   ├── reasoning.py               # ReasoningEngine
+│       │   ├── routes.py                  # /api/models/v1, v2, v3 routers
+│       │   ├── cloud_routes.py            # /api/cloud/provision-intent
+│       │   ├── universal.py               # /v1/ask universal dispatcher
+│       │   ├── specialist_base.py         # shared HF load/generate base class
+│       │   ├── train.py / precompute.py   # VxThinking training / FAISS build
+│       │   ├── cloudllm/                  # backend + routes + train (VxCloud)
+│       │   ├── codingllm/                 # backend + routes + train (VxCoder)
+│       │   └── supportllm/                # backend + routes + train (VxSupport)
+│       └── monitoring/                    # Prometheus, perf, logs (/monitoring/*)
+├── scripts/
+│   ├── gen_codingllm_dataset.py
+│   ├── gen_supportllm_dataset.py
+│   ├── smoke_test_specialists.py
+│   └── smoke_test_two.py
+├── nginx/                                 # reverse proxy config
+├── Dockerfile · docker-compose.yml
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-**FAISS index not found**
-```bash
-# Rebuild the index
-python -m app.precompute
-```
-
-**Index has 0 vectors / generic responses**
-- Ensure CSV files exist in `app/data/`
-- Run `python -m app.precompute` to populate the index
-
-**Model download failed**
-- Check internet connection (first run only)
-- Model is cached after first download (~80MB)
-
-**Out of memory**
-- Use smaller model: `all-MiniLM-L6-v2` (default, 80MB)
-- Reduce batch size in `embeddings.py`
-- Increase container memory limits
-
-**Connection refused on health check**
-- Wait for startup to complete
-- Check logs: `docker-compose logs vallm`
-
-### Debug Mode
-
-```bash
-# Enable verbose logging
-export VALLM_JSON_LOGGING=true
-python -m app.app
-```
-
----
-
-## Technology Stack
-
-| Category | Technologies |
-|----------|-------------|
-| **Framework** | FastAPI, Uvicorn |
-| **AI/ML** | sentence-transformers, FAISS, PyTorch, spaCy |
-| **Data** | Pandas, NumPy, PyPDF2 |
-| **Caching** | Redis, in-memory TTL cache |
-| **Monitoring** | Prometheus, Grafana |
-| **Container** | Docker, Docker Compose |
-| **Orchestration** | Kubernetes (AKS) |
-| **CI/CD** | GitHub Actions, Azure Pipelines |
-
----
-
-## License
-
-Private - Internal use only.
-
----
-
-## Contributing
-
-1. Create a feature branch
-2. Make changes and add tests
-3. Run linting: `flake8 app/`
-4. Submit pull request
-
-For detailed deployment instructions, see `deployment.md`.
-
-Summary of what’s in place:
-1. va_llm_v1 – Provision intent API
-New: va_llm_v1/app/services/ai/ml/cloud_routes.py
-POST /api/cloud/provision-intent
-Body: {"query": "user message"}.
-Response:
-Provisioning: query_type: "provisioning", intent (e.g. provision_vm, provision_docker, provision_database, …), payload (Golang-ready dict built from cloud_deployments.csv), confidence, match_prompt.
-Non‑provisioning: query_type one of "incident", "cost", "billing", "security", "recommendation", "other"; intent and payload are null so the agent does not call Golang.
-Uses the existing vector store over cloud_deployments (and any other CSVs). Rows with an intent column are treated as deployment rows; best match is turned into intent + payload via _raw_to_golang_payload() for VM, Kubernetes, Docker, FastAPI, static website, and database.
-app.py
-Registers the cloud router and documents the new endpoint in the API docstring.
-So va_llm_v1 is the place that decides intent and how Golang wants the request; it returns that in the payload for the agent.
-2. Precompute – Tag deployment rows
-app/services/ai/ml/precompute.py
-For each row, if the CSV has an intent column and it’s set, metadata is set with "type": "deployment".
-Lets you later restrict search to deployment rows (e.g. with filter_type="deployment") if you want.
-Re-run precompute after pulling so the FAISS index includes this metadata (and cloud_deployments.csv):
-python -m app.services.ai.ml.precompute from the va_llm_v1 root (with --dataset-dir app/data if you use it).
-3. InfinityAI cloud agent – Call va_llm, validate, then Golang
-InfinityAI/app/services/ai/agents/cloud/agent.py
-fetch_provision_intent(query)
-Calls va_llm_v1 POST /api/cloud/provision-intent.
-URL: env VA_LLM_V1_URL or VALLM_URL (default http://localhost:8002).
-Confidence threshold: PROVISION_INTENT_CONFIDENCE_MIN (default 0.2).
-Flow in handle_deployment_operation:
-LLM (OpenAI/Claude/etc.) still runs first to produce the user-facing reply.
-Call va_llm_v1 provision-intent.
-If query_type == "provisioning" and intent is set and confidence >= PROVISION_INTENT_CONFIDENCE_MIN:
-Use that intent and payload; merge in user_id, workspace_id, session_id, details.
-Trigger Golang via execute_provisioning_service(intent, payload) (unchanged).
-If query_type != "provisioning" (incidents, cost, billing, security, recommendations):
-Do not set intent or call Golang; the LLM reply is the full answer (optionally formatted by the same or another LLM).
-If va_llm_v1 is down or returns no provisioning match:
-Fallback to the existing keyword-based intent + extractors and, when a provisioning intent is found, still call the Golang API.
-So the agent scores/double-checks by only accepting provisioning when va_llm returns query_type=provisioning with sufficient confidence; then it triggers the Golang provisioner. For non‑provisioning, it only uses the LLM to format the answer.
-Flow summary
-User: “Deploy a t2.micro EC2” or “What were last week’s incidents?” or “Any cost recommendations?”
-va_llm_v1 (provision-intent):
-For “Deploy…”: returns query_type: "provisioning", intent, Golang payload.
-For incidents/cost/recommendations: returns query_type: "incident" / "cost" / "recommendation" and no intent/payload.
-Agent:
-Provisioning → merge session/user/workspace into payload → call Golang → then LLM can format the provisioning result for the user.
-Non‑provisioning → no Golang; LLM (OpenAI/Claude/etc.) formats the answer from context (e.g. incidents, cost, security, recommendations).
-Ensure va_llm_v1 is running (e.g. port 8002) and VA_LLM_V1_URL points to it when running the InfinityAI agent. After changing precompute, re-run it and restart va_llm_v1 so the new index is loaded.
+- **`{"status":"degraded"}` on `/v1/{cloud,coding,support}/health`** — fine-tuned weights are missing; the backend fell back to the HF base model. Run the matching `train.py`.
+- **`Vector store not initialized`** on `/search` — set `VxThinkingLLM_AUTO_PRECOMPUTE=true` (default) and add CSV/text to `app/data/datasets/thinkingllm/`, or run `python -m app.services.ai.ml.precompute`.
+- **CUDA OOM with all 4 models loaded** — drop one specialist by unsetting its model path so it falls back to CPU, or run on a larger GPU. All four backends share the device chosen at startup.
+- **Routing went to the wrong specialist** — call `GET /v1/ask/routes` to inspect the keyword table, or pass `force_model` in the request body.

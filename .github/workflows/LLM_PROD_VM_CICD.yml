@@ -11,7 +11,7 @@ on:
 env:
   DOCKER_IMAGE_NAME: backend
   DOCKER_REGISTRY: docker.io
-  DOCKER_USERNAME: valtunox
+  DOCKER_USERNAME: vxcloud
   PYTHON_VERSION: '3.11'
   VM_HOST_PROD: 34.235.125.179
   VM_APP_DIR: /home/ubuntu/backend
@@ -131,7 +131,7 @@ jobs:
           
           echo "✅ Deployment package created"
 
-      # Load CSV data from S3 bucket (data.valtunox.com) into app/data before deploy
+      # Load CSV data from S3 bucket (data.vxcloud.io) into app/data before deploy
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -142,7 +142,7 @@ jobs:
 
       - name: Sync CSV data from S3 to app/data
         run: |
-          S3_DATA_BUCKET="${{ secrets.S3_DATA_BUCKET || 'data.valtunox.com' }}"
+          S3_DATA_BUCKET="${{ secrets.S3_DATA_BUCKET || 'data.vxcloud.io' }}"
           DATA_DIR="deploy/app/data"
           echo "📥 Syncing CSV and data from s3://${S3_DATA_BUCKET}/ to ${DATA_DIR}/..."
           aws s3 sync "s3://${S3_DATA_BUCKET}/" "${DATA_DIR}/" \
@@ -310,7 +310,7 @@ jobs:
             sleep 10
             
             # Check all containers are running
-            for svc in backend valtunox-redis valtunox-celery-worker valtunox-celery-beat valtunox-flower; do
+            for svc in backend vxcloud-redis vxcloud-celery-worker vxcloud-celery-beat vxcloud-flower; do
               if sudo docker ps | grep -q "$svc"; then
                 echo "✅ $svc is running"
               else

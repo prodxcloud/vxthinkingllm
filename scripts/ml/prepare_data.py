@@ -37,7 +37,7 @@ REGIONS = [
     "ap-southeast-1", "ap-northeast-1", "ap-south-1",
     "ca-central-1", "sa-east-1",
 ]
-CLOUD_PROVIDERS = ["aws", "azure", "gcp", "valtunox"]
+CLOUD_PROVIDERS = ["aws", "azure", "gcp", "vxcloud"]
 ENVIRONMENTS = ["dev", "staging", "prod"]
 OS_OPTIONS = ["ubuntu-22.04", "ubuntu-24.04", "ubuntu", "centos", "debian-12", "amazon-linux-2"]
 BASE_URL = "http://localhost:8743"
@@ -603,7 +603,7 @@ def _host(prefix: str, n: int = 999) -> str:
     """Generate realistic hostnames for training data."""
     # Mix of realistic domain patterns users might actually request
     realistic_domains = [
-        "docs.example.com",
+        "docs.vxcloud.io",
         "api.mycompany.com", 
         "app.staging.com",
         "blog.example.org",
@@ -621,7 +621,7 @@ def _host(prefix: str, n: int = 999) -> str:
     if random.random() < 0.3:
         return random.choice(realistic_domains)
     else:
-        return f"{prefix}-{random.randint(1, n)}.example.com"
+        return f"{prefix}-{random.randint(1, n)}.vxcloud.io"
 
 
 def _maybe_user() -> str:
@@ -1305,14 +1305,14 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_fastapi":
         url = f"{b}/api/v1/infrastructure/services/fastapi/deploy"
         payload = {
-            "hostname": row.get("hostname") or "app-1.example.com",
+            "hostname": row.get("hostname") or "app-1.vxcloud.io",
             "app_name": row.get("app_name") or "fastapi-app",
             "app_port": row.get("app_port") or "8000",
             "http_port": row.get("http_port") or "80",
         }
 
     elif intent == "provision_static_website":
-        hostname = row.get("hostname") or "web-1.example.com"
+        hostname = row.get("hostname") or "web-1.vxcloud.io"
         url = f"{b}/api/v1/infrastructure/services/staticwebsite/deploy"
         payload = {
             "hostname": hostname,
@@ -1324,7 +1324,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
         url = f"{b}/api/v2/tenant/provision/databases"
         payload = {
             "username": row.get("username") or "user",
-            "hostname": row.get("hostname") or "db-1.example.com",
+            "hostname": row.get("hostname") or "db-1.vxcloud.io",
             "engine": row.get("database_engine") or "postgres",
             "database_name": row.get("database_name") or "appdb",
             "database_user": row.get("database_user") or "dbuser",
@@ -1335,7 +1335,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_reactjs":
         url = f"{b}/api/v1/infrastructure/services/reactjs/deploy"
         payload = {
-            "hostname": row.get("hostname") or "web-1.example.com",
+            "hostname": row.get("hostname") or "web-1.vxcloud.io",
             "app_name": row.get("app_name") or "react-app",
             "app_port": row.get("app_port") or "3000",
             "http_port": row.get("http_port") or "80",
@@ -1347,7 +1347,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_nextjs":
         url = f"{b}/api/v1/infrastructure/services/nextjs/deploy"
         payload = {
-            "hostname": row.get("hostname") or "web-1.example.com",
+            "hostname": row.get("hostname") or "web-1.vxcloud.io",
             "app_name": row.get("app_name") or "nextjs-app",
             "app_port": row.get("app_port") or "3000",
             "http_port": row.get("http_port") or "80",
@@ -1359,7 +1359,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_elk":
         url = f"{b}/api/v1/infrastructure/services/elk/deploy"
         payload = {
-            "hostname": row.get("hostname") or "elk-1.example.com",
+            "hostname": row.get("hostname") or "elk-1.vxcloud.io",
             "elk_version": row.get("elk_version") or "8.13.0",
             "elasticsearch_port": row.get("es_port") or "9200",
             "kibana_port": row.get("kibana_port") or "5601",
@@ -1369,7 +1369,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_vpn":
         url = f"{b}/api/v1/infrastructure/services/vpn/deploy"
         payload = {
-            "hostname": row.get("hostname") or "vpn-1.example.com",
+            "hostname": row.get("hostname") or "vpn-1.vxcloud.io",
             "vpn_protocol": row.get("vpn_protocol") or "openvpn",
             "vpn_port": row.get("vpn_port") or "1194",
             "max_clients": int(row.get("vpn_clients") or 10),
@@ -1392,7 +1392,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_monitoring":
         url = f"{b}/api/v1/infrastructure/services/monitoring/deploy"
         payload = {
-            "hostname": row.get("hostname") or "mon-1.example.com",
+            "hostname": row.get("hostname") or "mon-1.vxcloud.io",
             "monitoring_tool": row.get("monitoring_tool") or "prometheus",
             "port": row.get("monitoring_port") or "9090",
         }
@@ -1400,7 +1400,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_cicd":
         url = f"{b}/api/v1/infrastructure/services/cicd/deploy"
         payload = {
-            "hostname": row.get("hostname") or "cicd-1.example.com",
+            "hostname": row.get("hostname") or "cicd-1.vxcloud.io",
             "cicd_tool": row.get("cicd_tool") or "jenkins",
             "port": row.get("cicd_port") or "8080",
             "docker_image": row.get("docker_image") or "",
@@ -1409,7 +1409,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_loadbalancer":
         url = f"{b}/api/v1/infrastructure/services/loadbalancer/deploy"
         payload = {
-            "hostname": row.get("hostname") or "lb-1.example.com",
+            "hostname": row.get("hostname") or "lb-1.vxcloud.io",
             "lb_type": row.get("lb_type") or "nginx",
             "lb_algorithm": row.get("lb_algorithm") or "round-robin",
             "http_port": row.get("http_port") or "80",
@@ -1418,7 +1418,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_cache":
         url = f"{b}/api/v1/infrastructure/services/cache/deploy"
         payload = {
-            "hostname": row.get("hostname") or "cache-1.example.com",
+            "hostname": row.get("hostname") or "cache-1.vxcloud.io",
             "cache_engine": row.get("cache_engine") or "redis",
             "port": row.get("cache_port") or "6379",
             "cache_size_mb": int(row.get("cache_size_mb") or 256),
@@ -1437,14 +1437,14 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_ssl":
         url = f"{b}/api/v1/infrastructure/services/ssl/provision"
         payload = {
-            "domain_name": row.get("domain_name") or "example.com",
+            "domain_name": row.get("domain_name") or "vxcloud.io",
             "ssl_provider": row.get("ssl_provider") or "letsencrypt",
         }
 
     elif intent == "provision_wordpress":
         url = f"{b}/api/v1/infrastructure/services/wordpress/deploy"
         payload = {
-            "hostname": row.get("hostname") or "wp-1.example.com",
+            "hostname": row.get("hostname") or "wp-1.vxcloud.io",
             "http_port": row.get("http_port") or "80",
             "database_engine": row.get("database_engine") or "mysql",
             "app_name": row.get("app_name") or "wordpress",
@@ -1453,7 +1453,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_django":
         url = f"{b}/api/v1/infrastructure/services/django/deploy"
         payload = {
-            "hostname": row.get("hostname") or "app-1.example.com",
+            "hostname": row.get("hostname") or "app-1.vxcloud.io",
             "app_name": row.get("app_name") or "django-app",
             "app_port": row.get("app_port") or "8000",
             "http_port": row.get("http_port") or "80",
@@ -1465,7 +1465,7 @@ def get_endpoint_and_payload(intent: str, row: dict) -> tuple:
     elif intent == "provision_springboot":
         url = f"{b}/api/v1/infrastructure/services/springboot/deploy"
         payload = {
-            "hostname": row.get("hostname") or "app-1.example.com",
+            "hostname": row.get("hostname") or "app-1.vxcloud.io",
             "app_name": row.get("app_name") or "springboot-svc",
             "app_port": row.get("app_port") or "8080",
             "http_port": row.get("http_port") or "80",
