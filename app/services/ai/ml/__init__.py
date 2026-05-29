@@ -1,29 +1,12 @@
-"""
-VaLLM ML Services - Machine Learning and AI components
-"""
+"""VxCloud ML services — CloudLLM only."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
-# Core ML components
-from .embeddings import VectorStore, embedding_service
-from .reasoning import ReasoningEngine
-from .cache import TTLCache, get_embedding_cache, get_search_cache, get_all_cache_stats
-
-# Routes
-from .routes import router, router_v2, router_v3
+from .backend import CloudLLMBackend, build_cloudllm_config
+from .routes import router as cloudllm_router
 
 __all__ = [
-    # Core
-    "VectorStore",
-    "embedding_service",
-    "ReasoningEngine",
-    # Cache
-    "TTLCache",
-    "get_embedding_cache",
-    "get_search_cache",
-    "get_all_cache_stats",
-    # Routes
-    "router",
-    "router_v2",
-    "router_v3",
+    "CloudLLMBackend",
+    "build_cloudllm_config",
+    "cloudllm_router",
 ]

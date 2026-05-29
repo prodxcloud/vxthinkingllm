@@ -1,19 +1,9 @@
-"""
-CloudLLMBackend — VxCloud v1.0
-===============================
-DevOps / IaC / SRE specialist.
-
-Mirrors the VxThinkingLLM load + generate pattern via the shared
-SpecialistBackend base. The only per-model differences are the model path,
-the base fallback HF id, and the system prompt.
-"""
+"""CloudLLMBackend — VxCloud DevOps / IaC / SRE specialist."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 try:
-    from ..specialist_base import (
+    from .specialist_base import (
         SpecialistBackend,
         SpecialistConfig,
         resolve_model_path,
@@ -45,18 +35,12 @@ def build_cloudllm_config(device: str = "cuda") -> SpecialistConfig:
     return SpecialistConfig(
         slug="cloudllm",
         display_name="VxCloud v1.0",
-        model_path=resolve_model_path(
-            "CLOUDLLM_MODEL_PATH",
-            "app/data/models/cloudllm",
-        ),
-        dataset_dir=resolve_dataset_dir(
-            "CLOUDLLM_DATASET_DIR",
-            "app/data/datasets/cloudllm",
-        ),
+        model_path=resolve_model_path("CLOUDLLM_MODEL_PATH", "app/data/models"),
+        dataset_dir=resolve_dataset_dir("CLOUDLLM_DATASET_DIR", "app/data/datasets"),
         fallback_base_model="Qwen/Qwen2.5-0.5B-Instruct",
         system_prompt=CLOUDLLM_SYSTEM_PROMPT,
         device=device,
-        prefix="/v1/cloud",
+        prefix="/v1/model",
     )
 
 
