@@ -40,7 +40,7 @@ REGIONS = [
 CLOUD_PROVIDERS = ["aws", "azure", "gcp", "vxcloud"]
 ENVIRONMENTS = ["dev", "staging", "prod"]
 OS_OPTIONS = ["ubuntu-22.04", "ubuntu-24.04", "ubuntu", "centos", "debian-12", "amazon-linux-2"]
-BASE_URL = "http://localhost:8743"
+BASE_URL = "https://cloud.vxcloud.io"
 
 # ============================================================================
 #  VM (EC2 / Compute)

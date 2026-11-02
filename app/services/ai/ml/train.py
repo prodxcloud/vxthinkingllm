@@ -30,7 +30,7 @@ def _repo_root() -> Path:
 
 DEFAULT_DATASETS_DIR = _repo_root() / "app" / "data" / "datasets"
 DEFAULT_OUTPUT_DIR = _repo_root() / "app" / "data" / "models"
-LLM_MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"
+LLM_MODEL_NAME = "distilgpt2"
 SUPPORTED_SUFFIXES = {".csv", ".txt", ".md", ".json"}
 
 

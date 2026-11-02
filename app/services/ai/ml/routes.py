@@ -60,6 +60,7 @@ def _run_generate(request: CloudGenerateRequest, req: Request) -> Dict[str, Any]
 
 
 @router.get("/v1/model/health")
+@router.get("/v1/cloud/health")
 async def health(req: Request) -> Dict[str, Any]:
     backend = _get_backend(req)
     return {
@@ -76,6 +77,7 @@ async def health(req: Request) -> Dict[str, Any]:
 @router.post("/execute", response_model=CloudGenerateResponse)
 @router.post("/run", response_model=CloudGenerateResponse)
 @router.post("/v1/model/generate", response_model=CloudGenerateResponse)
+@router.post("/v1/cloud/generate", response_model=CloudGenerateResponse)
 async def generate(request: CloudGenerateRequest, req: Request) -> CloudGenerateResponse:
     result = _run_generate(request, req)
     return CloudGenerateResponse(
@@ -88,8 +90,41 @@ async def generate(request: CloudGenerateRequest, req: Request) -> CloudGenerate
 
 
 @router.post("/v1/model/query")
+@router.post("/v1/cloud/query")
 async def query(request: CloudGenerateRequest, req: Request) -> Dict[str, Any]:
     """Generate + return the richer payload (raw, loaded_from, etc.)."""
     result = _run_generate(request, req)
     result["query"] = request.prompt
     return result
+
+
+@router.post("/v1/ask")
+async def ask(req: Request) -> Dict[str, Any]:
+    body = await req.json()
+    gen_req = CloudGenerateRequest(
+        prompt=body.get("prompt", ""),
+        max_new_tokens=body.get("max_new_tokens", 400),
+        temperature=body.get("temperature", 0.3),
+        top_p=body.get("top_p", 0.9),
+        context=body.get("context", None)
+    )
+    result = _run_generate(gen_req, req)
+    return {
+        "routed_to": "cloudllm",
+        "routing_scores": {
+            "cloudllm": 1.0,
+            "codingllm": 0.0,
+            "supportllm": 0.0,
+            "thinkingllm": 0.0
+        },
+        "response": result.get("response", ""),
+    }
+
+
+@router.get("/v1/ask/routes")
+async def ask_routes() -> Dict[str, Any]:
+    return {
+        "routing_rules": {
+            "cloudllm": ["terraform", "kubernetes", "helm", "iam", "aws", "azure", "gcp"]
+        }
+    }

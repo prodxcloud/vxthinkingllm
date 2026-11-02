@@ -692,12 +692,12 @@ Escalate: if `allMapped: false` dominates, refactor the target to a plain classN
 
 Steps:
   1. Studio → "Publish" → "Custom Domain".
-  2. Enter your domain (e.g., `app.vxcloud.io`).
-  3. Add the CNAME shown (e.g., `app.vxcloud.io → <session>.prodxcloud.app`). TTL 300 is fine.
+  2. Enter your domain (e.g., `vxcloud.io`).
+  3. Add the CNAME shown (e.g., `vxcloud.io → <session>.prodxcloud.app`). TTL 300 is fine.
   4. Click "Verify" — it polls until propagation succeeds (1–5 min typically).
   5. Production panel shows `live` + padlock once the cert issues.
 
-Verify: `curl -I https://app.vxcloud.io` returns 200, cert CN matches.
+Verify: `curl -I https://vxcloud.io` returns 200, cert CN matches.
 
 Escalate: stuck in "verifying" > 30 min — CNAME target is wrong. Each workspace has its own — copy from the modal. Source: DNSModal + ProductionStatusPanel."""))
 

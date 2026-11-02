@@ -5,7 +5,7 @@ cors_config = {
         "http://localhost:5002",
         "http://localhost:5001",
         "http://localhost:4005",
-        "http://localhost:8743",
+        "https://cloud.vxcloud.io",
         "http://localhost:8742",
     ],
     "allow_credentials": True,
