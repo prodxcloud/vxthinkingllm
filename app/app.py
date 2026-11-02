@@ -17,6 +17,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -34,8 +35,10 @@ from fastapi.responses import HTMLResponse
 
 try:
     from .services.ai.ml import CloudLLMBackend, build_cloudllm_config, cloudllm_router
+    from .services.docs import DocsService, router as docs_router
 except ImportError:
     from services.ai.ml import CloudLLMBackend, build_cloudllm_config, cloudllm_router
+    from services.docs import DocsService, router as docs_router
 
 
 @asynccontextmanager
@@ -44,7 +47,18 @@ async def lifespan(app: FastAPI):
     backend = CloudLLMBackend(build_cloudllm_config(device=device))
     backend.load()
     app.state.cloudllm = backend
+
+    # Docs-grounded Q&A: load the prebuilt index; if missing, build it in the background
+    # (VXDOCS_AUTO_INDEX=false to disable) so first boot never blocks on the network.
+    docs = DocsService()
+    docs.load()
+    app.state.docs = docs
+    bg = None
+    if not docs.ready and os.getenv("VXDOCS_AUTO_INDEX", "true").lower() != "false":
+        bg = asyncio.create_task(docs.reindex())
     yield
+    if bg is not None and not bg.done():
+        bg.cancel()
 
 
 app = FastAPI(
@@ -63,6 +77,7 @@ app.add_middleware(
 )
 
 app.include_router(cloudllm_router)
+app.include_router(docs_router)
 
 
 # Where the "Back to Dashboard" control points. This service runs standalone on
@@ -173,6 +188,9 @@ _LANDING_PAGE = """<!doctype html>
     <li><span class="method">GET</span> <code>/v1/cloud/health</code></li>
     <li><span class="method">POST</span> <code>/v1/cloud/generate</code></li>
     <li><span class="method">POST</span> <code>/v1/cloud/query</code></li>
+    <li><span class="method">POST</span> <code>/v1/docs/ask</code> &mdash; ask about VxCloud / vxcli / API / SDKs (grounded in vxcloud.io/docs)</li>
+    <li><span class="method">POST</span> <code>/v1/docs/search</code></li>
+    <li><span class="method">GET</span> <code>/v1/docs/health</code></li>
     <li><span class="method">DOCS</span> <a href="/docs">/docs</a> &middot; <a href="/redoc">/redoc</a></li>
   </ul>
 </main>

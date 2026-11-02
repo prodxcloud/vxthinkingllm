@@ -12,6 +12,7 @@ All inference endpoints hit the same in-process CloudLLM backend:
 """
 
 import logging
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -98,9 +99,22 @@ async def query(request: CloudGenerateRequest, req: Request) -> Dict[str, Any]:
     return result
 
 
+_PRODUCT_RE = re.compile(
+    r"vxcli|vxcloud|prodxcloud|vxsdk|vxai|vxthinking|salesshift|agentcontrol|vxchrono|tenant node|xc_(?:live|test)_",
+    re.I,
+)
+
+
 @router.post("/v1/ask")
 async def ask(req: Request) -> Dict[str, Any]:
     body = await req.json()
+    # Questions about the VxCloud product itself are answered from the docs, not from model weights.
+    docs = getattr(req.app.state, "docs", None)
+    if docs is not None and docs.ready and _PRODUCT_RE.search(str(body.get("prompt", ""))):
+        from ...docs.routes import run_answer
+        out = await run_answer(req.app, docs, str(body["prompt"]))
+        if out.get("grounded"):
+            return {"routed_to": "docs", "response": out["answer"], "sources": out["sources"], "mode": out["mode"]}
     gen_req = CloudGenerateRequest(
         prompt=body.get("prompt", ""),
         max_new_tokens=body.get("max_new_tokens", 400),

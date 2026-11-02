@@ -12,6 +12,7 @@
 - [Training the Models](#training-the-models)
 - [Deployment](#deployment)
 - [API Reference](#api-reference)
+- [Docs-grounded Q&A](#docs-grounded-qa-vxcloudio)
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
@@ -235,6 +236,47 @@ Mounted at `/api/models/v3`.
 | `POST` | `/monitoring/performance/test` | Synthetic perf event |
 | `GET` | `/monitoring/logs` · `/stats` · `/errors` · `/warnings` · `/search` · `/tail` · `/info` · `/file` · `/file/download` | Log inspection |
 | `GET` | `/monitoring/observability/status` | Tracing / metrics backend status |
+
+---
+
+## Docs-grounded Q&A (vxcloud.io)
+
+Questions about the VxCloud product ("How do I install vxcli?", "which header authenticates the API?") are answered from the live docs, not from model weights. The pipeline is retrieve → ground → answer:
+
+```
+vxcloud.io/docs (+ llms.txt, product pages)
+   └─ crawler.py   HTML → heading-level chunks, code blocks verbatim;
+                   CLI/SDK reference read from the Next.js payload (per-command flags/usage/examples)
+   └─ index.py     BM25 (title + URL slug + heading + body), stemming, heading-precision boost
+   └─ answer.py    refuse if weak/uncovered → else LLM answer from excerpts or extractive answer
+```
+
+```bash
+python -m app.services.docs.build          # crawl + index → app/data/docs_index/index.json (~10 s)
+python -m scripts.eval_docs --min-pass 0.9 # gold-set check; add a case for every bad answer reported
+curl -s localhost:8745/v1/docs/ask -H 'content-type: application/json' \
+  -d '{"question":"How do I install vxcli?"}' | jq -r .answer
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /v1/docs/ask` | `{question, k, mode: auto\|llm\|extractive}` → `answer`, `sources[]`, `mode`, `grounded` |
+| `POST /v1/docs/search` | ranked sections, no generation |
+| `GET /v1/docs/health` | index status (chunks, pages, built_at) |
+| `POST /v1/docs/reindex` | re-crawl; requires `X-Admin-Token` = `$VXDOCS_ADMIN_TOKEN` (disabled when unset) |
+| `POST /v1/ask` | prompts mentioning vxcli / vxcloud / prodxcloud / SDK / etc. are routed to the docs |
+
+**Answer modes.** `extractive` returns the best section verbatim, so commands can't be hallucinated. `llm` puts the top excerpts in the prompt (chat template, greedy) and is accepted only if every command in the output also appears in the excerpts; otherwise it falls back to extractive. `auto` uses `llm` when the loaded model has a chat template (the `distilgpt2` fallback has none, so it serves extractive answers).
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `VXDOCS_INDEX_PATH` | `app/data/docs_index/index.json` | Index location |
+| `VXDOCS_AUTO_INDEX` | `true` | Build the index in the background at startup if missing |
+| `VXDOCS_ADMIN_TOKEN` | *(unset)* | Enables `POST /v1/docs/reindex` |
+| `DOCS_ANSWER_MODE` | `auto` | Default answer mode |
+| `DOCS_MIN_SCORE` / `DOCS_MIN_COVERAGE` | `4.0` / `0.5` | Refusal gate (BM25 floor / share of query terms found) |
+
+Re-index after each docs deploy (CI step: `python -m app.services.docs.build`), not per request.
 
 ---
 
