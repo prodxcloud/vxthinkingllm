@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup, Tag
@@ -59,6 +59,19 @@ EXCLUDED_PREFIXES: Tuple[str, ...] = (
 
 MAX_CHUNK_CHARS = 2200
 MIN_CHUNK_CHARS = 40
+
+# Secondary doc sites folded into the SAME index, so one /v1/docs/ask (and the
+# /v1/ask dispatcher) answers both platform (DevOps) and SalesShift
+# (customer-service / product) questions. SalesShift keeps its whole reference
+# under /docs (api, cli, sdks, guides) plus a curated /docs/llms.txt.
+SALESSHIFT_BASE_URL = "https://salesshift.vxcloud.io"
+SALESSHIFT_PREFIXES: Tuple[str, ...] = ("/docs",)
+
+# (base_url, prefixes) for every site crawled into the combined index.
+DEFAULT_SITES: Tuple[Dict[str, Any], ...] = (
+    {"base_url": BASE_URL, "prefixes": DEFAULT_ALLOWED_PREFIXES},
+    {"base_url": SALESSHIFT_BASE_URL, "prefixes": SALESSHIFT_PREFIXES},
+)
 
 
 @dataclass
@@ -470,3 +483,37 @@ async def crawl(
         if own_client:
             await client.aclose()
     return chunks, errors
+
+
+async def crawl_sites(
+    sites: Sequence[Dict[str, Any]] = DEFAULT_SITES,
+    *,
+    max_pages: int = 400,
+    concurrency: int = 8,
+    timeout: float = 20.0,
+) -> Tuple[List[Chunk], Dict[str, str]]:
+    """Crawl several doc sites and merge them into one chunk list.
+
+    Each chunk keeps its own absolute url/source_url (host included), so retrieval
+    stays correctly attributed and the UI links to the right site. Chunk ids are
+    prefixed with the site tag because both sites have same-path pages (e.g.
+    /docs/cli) whose per-page ids would otherwise collide.
+    """
+    all_chunks: List[Chunk] = []
+    all_errors: Dict[str, str] = {}
+    for site in sites:
+        base = site["base_url"]
+        prefixes = tuple(site.get("prefixes") or DEFAULT_ALLOWED_PREFIXES)
+        chunks, errors = await crawl(
+            base_url=base, prefixes=prefixes,
+            max_pages=max_pages, concurrency=concurrency, timeout=timeout,
+        )
+        tag = urlparse(base).netloc.split(".")[0] or "site"
+        for c in chunks:
+            c.id = f"{tag}:{c.id}"
+        all_chunks.extend(chunks)
+        all_errors.update(errors)
+        logger.info("site %s -> %d chunks (%d errors)", base, len(chunks), len(errors))
+    logger.info("crawl_sites: %d site(s) -> %d chunks total (%d errors)",
+                len(sites), len(all_chunks), len(all_errors))
+    return all_chunks, all_errors

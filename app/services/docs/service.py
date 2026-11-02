@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .crawler import crawl
+from .crawler import DEFAULT_SITES, crawl, crawl_sites
 from .index import DocIndex
 
 logger = logging.getLogger("vxthinking.docs.service")
@@ -48,14 +48,25 @@ class DocsService:
             return False
 
     async def reindex(self, **crawl_kwargs: Any) -> Dict[str, Any]:
-        """Crawl -> build -> atomically persist -> swap. Serves the old index until the new one is ready."""
+        """Crawl -> build -> atomically persist -> swap. Serves the old index until the new one is ready.
+
+        With no `base_url`, crawls every site in `sites` (default: vxcloud.io +
+        salesshift.vxcloud.io) into one index. Pass `base_url=` to crawl a single
+        site (used by `build.py --base-url`).
+        """
         if self._lock.locked():
             return {"status": "already_running"}
         async with self._lock:
             self.reindexing = True
             t0 = time.perf_counter()
             try:
-                chunks, errors = await crawl(**crawl_kwargs)
+                sites = crawl_kwargs.pop("sites", None)
+                if crawl_kwargs.get("base_url"):
+                    chunks, errors = await crawl(**crawl_kwargs)
+                else:
+                    crawl_kwargs.pop("base_url", None)
+                    crawl_kwargs.pop("prefixes", None)
+                    chunks, errors = await crawl_sites(sites or DEFAULT_SITES, **crawl_kwargs)
                 if not chunks:
                     return {"status": "failed", "error": "crawl produced no chunks", "errors": errors}
                 new = DocIndex(chunks)

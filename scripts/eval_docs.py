@@ -34,6 +34,18 @@ GOLD = [
     ("How do I store secrets in Vault?", "/docs/guides/store-secrets-in-vault", ["Vault"]),
     ("How do I set up a blue-green CI/CD pipeline?", "/docs/guides/cicd-blue-green-pipeline", []),
     ("Can I run VxCloud on my own hardware?", "/pages/web/self-hosted", []),
+    # --- SalesShift (customer-service / product questions, same combined index) ---
+    ("How much does SalesShift cost?", "salesshift.vxcloud.io/docs/guides/plans-and-self-hosting", []),
+    ("What is the cheapest SalesShift plan?", "salesshift.vxcloud.io/docs", []),
+    ("How do I authenticate to the SalesShift API?", "salesshift.vxcloud.io/docs/cli", ["vxcli auth login"]),
+    ("How do I log in with the SalesShift CLI?", "salesshift.vxcloud.io/docs/cli", ["vxcli auth login"]),
+    ("What is the SalesShift API base path?", "salesshift.vxcloud.io/docs", ["/api/v1/salesshift"]),
+    ("How do I send a tracked email with SalesShift?", "salesshift.vxcloud.io/docs/guides/sending-email", ["/email/send"]),
+    ("How do I create a sequence in SalesShift?", "salesshift.vxcloud.io/docs/cli", ["sequences create"]),
+    ("Can I use my own mailbox with SalesShift?", "salesshift.vxcloud.io/docs/guides/plans-and-self-hosting", []),
+    ("What are SalesShift AI credits?", "salesshift.vxcloud.io/docs", ["credit"]),
+    ("How do I start the SalesShift free trial?", "salesshift.vxcloud.io/docs/guides/plans-and-self-hosting", []),
+    ("How do I reveal a prospect in SalesShift?", "salesshift.vxcloud.io/docs/cli", ["reveal"]),
 ]
 REFUSE = ["What is the capital of France?", "Write me a poem about cats", "Who won the 2018 World Cup?"]
 

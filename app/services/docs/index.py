@@ -21,13 +21,21 @@ from .crawler import Chunk
 _TOKEN = re.compile(r"[a-z0-9]+(?:[._/-][a-z0-9]+)*")
 _STOP = frozenset(
     "a an and are as at be by can do does for from how i in is it its me my of on or the to we what when where which with you your "
-    "should would could there this that these those into onto about get use using".split()
+    "should would could there this that these those into onto about get use using much many lot".split()
 )
 # Cheap query-side synonyms for how people phrase things vs how the docs do.
 _SYNONYMS = {
     "setup": ["install", "configure"], "download": ["install"],
     "login": ["auth"], "signin": ["auth", "login"],
+    # Users commonly call the developer API token an "API key".
+    "key": ["token"], "keys": ["token"],
     "cli": ["vxcli"], "terminal": ["vxcli"],
+    # pricing phrasing: users ask "how much does it cost", docs say "pricing"/"plan".
+    # Values are stemmed forms so they match the corpus (pricing/price -> "pric").
+    "cost": ["pric", "plan"], "costs": ["pric", "plan"], "price": ["pric", "plan"],
+    "pricing": ["plan"], "subscription": ["plan", "bill"],
+    "cheap": ["pric", "plan"], "cheapest": ["pric", "plan"], "affordable": ["pric", "plan"],
+    "expensive": ["pric", "plan"],
 }
 
 
@@ -134,11 +142,17 @@ class DocIndex:
     def coverage(self, query: str, chunk_idx: int) -> float:
         """Fraction of the query's information (idf mass) present in the chunk. Terms the corpus has
         never seen count as fully missing, which is what makes off-topic questions fail the gate."""
-        q = set(tokenize(query))          # no synonym expansion: coverage is about the user's own words
+        q = set(tokenize(query))          # the user's own words (unexpanded)
         if not q:
             return 0.0
+        tf = self._tf[chunk_idx]
+        # A term counts as present if it, or one of its synonyms, is in the chunk — so
+        # "cost" is covered by a chunk that says "pricing"/"plan". Off-topic words have no
+        # synonym and must appear literally, which is what still makes junk queries fail.
+        def present(t: str) -> bool:
+            return bool(tf.get(t)) or any(tf.get(s) for s in _SYNONYMS.get(t, ()))
         total = sum(self.idf(t) if t in self._df else self.idf("") for t in q)
-        got = sum(self.idf(t) for t in q if self._tf[chunk_idx].get(t))
+        got = sum(self.idf(t) for t in q if present(t))
         return got / total if total else 0.0
 
     def search(
@@ -171,6 +185,42 @@ class DocIndex:
             leaf = tokenize(c.heading_path[-1]) if c.heading_path else []
             if leaf:
                 sparse[i] *= 1 + 0.8 * (sum(t in qset for t in leaf) / len(leaf))
+
+        # Product affinity: the combined index holds both VxCloud and SalesShift docs,
+        # which share same-named pages (/docs/cli, /docs/sdks). When the query names one
+        # product by brand, prefer that product's pages and demote the other's — the same
+        # signal the /v1/ask dispatcher routes on. Queries that name neither are left to
+        # pure BM25 (product-specific vocab like "sequence"/"provision VM" self-separates).
+        ql = query.lower()
+        wants_ss = "salesshift" in ql or "sales shift" in ql
+        # Auth questions are especially prone to generic "set up" chunks
+        # outranking the actual token instructions. Prefer sections whose
+        # title/body explicitly discusses API keys or tokens.
+        wants_api_auth = bool(re.search(r"\b(api\s+key|api\s+token|developer\s+key|access\s+token)\b", ql))
+        if wants_api_auth:
+            for i in list(sparse):
+                c = self.chunks[i]
+                auth_text = f"{c.page_title} {' '.join(c.heading_path)} {c.text}".lower()
+                if re.search(r"\b(api\s+(?:key|token)|developer\s+api\s+key|generate an api token|x-api-key)\b", auth_text):
+                    sparse[i] *= 2.0
+                elif "salesshift" in auth_text and "sending" in auth_text:
+                    sparse[i] *= 0.35
+        # Broad definition questions should prefer the product overview rather
+        # than an incidental CLI command such as `salesshift stats`.
+        wants_definition = bool(re.search(r"\bwhat(?:\s+is|'s)\b|\babout\b|\boverview\b", ql))
+        if wants_definition and wants_ss:
+            for i in list(sparse):
+                c = self.chunks[i]
+                text = f"{c.page_title} {' '.join(c.heading_path)} {c.text}".lower()
+                if any(term in text for term in ("crm", "outbound", "prospect", "quote-to-cash", "sales platform", "sales product")):
+                    sparse[i] *= 2.2
+                if "vxcli" in c.page_title.lower() or "vxcli" in " ".join(c.heading_path).lower():
+                    sparse[i] *= 0.45
+        wants_vx = any(t in ql for t in ("vxcli", "vxcloud", "prodxcloud", "vxsdk", "vxthink", "vxnode"))
+        if wants_vx != wants_ss:   # exactly one product named
+            for i in list(sparse):
+                is_ss = "salesshift" in urlparse(self.chunks[i].url).netloc
+                sparse[i] *= 1.6 if is_ss == wants_ss else 0.55
 
         ranked = sorted(sparse.items(), key=lambda kv: kv[1], reverse=True)
         if dense is not None:

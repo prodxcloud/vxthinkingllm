@@ -43,6 +43,7 @@ class TrainConfig:
     per_device_train_batch_size: int = 4
     gradient_accumulation_steps: int = 4
     num_train_epochs: float = 1.0
+    max_steps: int = -1          # >0 caps total optimizer steps (bounded CPU runs)
     learning_rate: float = 5e-5
     weight_decay: float = 0.01
     warmup_ratio: float = 0.03
@@ -89,7 +90,10 @@ def load_texts(cfg: TrainConfig) -> List[str]:
 
     accepted = {f".{t.lower().lstrip('.')}" for t in cfg.file_types} & SUPPORTED_SUFFIXES
     texts: List[str] = []
-    for path in sorted(p for p in cfg.datasets_dir.iterdir() if p.is_file() and p.suffix.lower() in accepted):
+    # rglob (not iterdir): datasets are organised in per-specialist subfolders
+    # (cloudllm/, supportllm/, ...), so a flat iterdir would read nothing.
+    for path in sorted(p for p in cfg.datasets_dir.rglob("*")
+                       if p.is_file() and p.suffix.lower() in accepted and "_checkpoints" not in p.parts):
         suffix = path.suffix.lower()
         if suffix == ".csv":
             file_texts = _read_csv(path)
@@ -148,6 +152,7 @@ def train(cfg: TrainConfig) -> None:
         per_device_train_batch_size=cfg.per_device_train_batch_size,
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         num_train_epochs=cfg.num_train_epochs,
+        max_steps=cfg.max_steps,
         learning_rate=cfg.learning_rate,
         weight_decay=cfg.weight_decay,
         warmup_ratio=cfg.warmup_ratio,
@@ -185,6 +190,7 @@ def parse_args(argv: List[str] | None = None) -> TrainConfig:
     parser.add_argument("--per-device-train-batch-size", type=int, default=4)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
+    parser.add_argument("--max-steps", type=int, default=-1, help=">0 caps optimizer steps")
     parser.add_argument("--learning-rate", type=float, default=5e-5)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-ratio", type=float, default=0.03)
@@ -201,6 +207,7 @@ def parse_args(argv: List[str] | None = None) -> TrainConfig:
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_train_epochs,
+        max_steps=args.max_steps,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         warmup_ratio=args.warmup_ratio,

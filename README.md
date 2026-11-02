@@ -113,6 +113,21 @@ python -m app.services.ai.ml.precompute
 
 **Auto-train** is on by default — if `app/data/models/thinkingllm/config.json` is missing on startup and a dataset is present, training launches automatically (set `VxThinkingLLM_AUTO_TRAIN=false` to disable).
 
+### Train on real VxCloud + SalesShift knowledge
+
+`app.services.ai.ml.train` reads **every** `.csv/.json/.txt/.md` under `app/data/datasets/` (recursively, so each specialist subfolder is included) and fine-tunes a causal LM on it. To (re)train on the live product docs — DevOps **and** customer-service — regenerate the corpus from the retrieval index, then train:
+
+```bash
+python -m app.services.docs.build                     # 1. refresh the combined index (both sites)
+python scripts/ml/build_knowledge_dataset.py          # 2. index + llms.txt + vxnode runbook → app/data/datasets/supportllm/ (~15k examples)
+python -m app.services.ai.ml.train \                  # 3. fine-tune (continue from the current weights)
+  --model-name-or-path app/data/models/cloudllm \
+  --output-dir app/data/models/cloudllm_support \
+  --max-steps 250                                     #    --max-steps caps CPU runs; drop it for a full epoch
+```
+
+Point `CLOUDLLM_MODEL_PATH` at the new dir to serve it. The 6-layer GPT-2 fallback is tiny — it adapts to the domain's vocabulary but is **not** a reliable answerer; grounded answers come from the retrieval index (extractive mode), and real generative answers need a chat model (e.g. `Qwen2.5-Instruct`) via `CLOUDLLM_MODEL_PATH` + `mode: "llm"`.
+
 ---
 
 ## Deployment
@@ -239,24 +254,28 @@ Mounted at `/api/models/v3`.
 
 ---
 
-## Docs-grounded Q&A (vxcloud.io)
+## Docs-grounded Q&A (vxcloud.io + SalesShift)
 
-Questions about the VxCloud product ("How do I install vxcli?", "which header authenticates the API?") are answered from the live docs, not from model weights. The pipeline is retrieve → ground → answer:
+Questions about the products — DevOps ("How do I install vxcli?", "which header authenticates the API?") **and** customer-service ("How much does SalesShift cost?", "How do I send a tracked email?") — are answered from the live docs, not from model weights. One combined index covers **both** sites, so a single `/v1/docs/ask` (and the `/v1/ask` dispatcher) answers either. The pipeline is retrieve → ground → answer:
 
 ```
-vxcloud.io/docs (+ llms.txt, product pages)
-   └─ crawler.py   HTML → heading-level chunks, code blocks verbatim;
+vxcloud.io/docs + salesshift.vxcloud.io/docs   (llms.txt + product/guide pages)
+   └─ crawler.py   crawl_sites() merges both sites; HTML → heading-level chunks, code verbatim;
                    CLI/SDK reference read from the Next.js payload (per-command flags/usage/examples)
-   └─ index.py     BM25 (title + URL slug + heading + body), stemming, heading-precision boost
+   └─ index.py     BM25 (title + URL slug + heading + body), stemming, heading-precision boost,
+                   product affinity (a query naming vxcli/SalesShift prefers that site's pages)
    └─ answer.py    refuse if weak/uncovered → else LLM answer from excerpts or extractive answer
 ```
 
 ```bash
-python -m app.services.docs.build          # crawl + index → app/data/docs_index/index.json (~10 s)
-python -m scripts.eval_docs --min-pass 0.9 # gold-set check; add a case for every bad answer reported
+python -m app.services.docs.build              # crawl BOTH sites + index → data/docs_index/index.json (~40 s, ~1700 chunks)
+python -m app.services.docs.build --base-url https://vxcloud.io   # one site only
+python -m scripts.eval_docs --min-pass 0.9     # gold-set check (VxCloud + SalesShift); add a case for every bad answer
 curl -s localhost:8745/v1/docs/ask -H 'content-type: application/json' \
-  -d '{"question":"How do I install vxcli?"}' | jq -r .answer
+  -d '{"question":"How much does SalesShift cost?"}' | jq -r .answer
 ```
+
+> The same corpus feeds training: `python scripts/ml/build_knowledge_dataset.py` serialises the index (plus both `llms.txt` and the vxnode runbook) into `app/data/datasets/supportllm/`, so the specialist can be retrained on real VxCloud + SalesShift knowledge. See [Training the Models](#training-the-models).
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -264,13 +283,13 @@ curl -s localhost:8745/v1/docs/ask -H 'content-type: application/json' \
 | `POST /v1/docs/search` | ranked sections, no generation |
 | `GET /v1/docs/health` | index status (chunks, pages, built_at) |
 | `POST /v1/docs/reindex` | re-crawl; requires `X-Admin-Token` = `$VXDOCS_ADMIN_TOKEN` (disabled when unset) |
-| `POST /v1/ask` | prompts mentioning vxcli / vxcloud / prodxcloud / SDK / etc. are routed to the docs |
+| `POST /v1/ask` | prompts mentioning vxcli / vxcloud / prodxcloud / **salesshift** / SDK / etc. are routed to the docs |
 
 **Answer modes.** `extractive` returns the best section verbatim, so commands can't be hallucinated. `llm` puts the top excerpts in the prompt (chat template, greedy) and is accepted only if every command in the output also appears in the excerpts; otherwise it falls back to extractive. `auto` uses `llm` when the loaded model has a chat template (the `distilgpt2` fallback has none, so it serves extractive answers).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `VXDOCS_INDEX_PATH` | `app/data/docs_index/index.json` | Index location |
+| `VXDOCS_INDEX_PATH` | `data/docs_index/index.json` | Index location |
 | `VXDOCS_AUTO_INDEX` | `true` | Build the index in the background at startup if missing |
 | `VXDOCS_ADMIN_TOKEN` | *(unset)* | Enables `POST /v1/docs/reindex` |
 | `DOCS_ANSWER_MODE` | `auto` | Default answer mode |
