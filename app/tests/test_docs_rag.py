@@ -190,3 +190,28 @@ def test_reindex_requires_admin_token(client, monkeypatch):
     monkeypatch.setenv("VXDOCS_ADMIN_TOKEN", "s3cret")
     assert client.post("/v1/docs/reindex").status_code == 401
     assert client.post("/v1/docs/reindex", headers={"X-Admin-Token": "wrong"}).status_code == 401
+
+
+# --- Next.js payload (CLI command reference) ----------------------------------
+def test_flight_payload_yields_per_command_chunks_with_flags_and_examples():
+    import json
+    from app.services.docs.crawler import flight_chunks
+    group = {"namespace": "Authentication (vxcli auth)", "commands": [{
+        "name": "vxcli auth login", "description": "Authenticate with browser, device code or API key.",
+        "usage": "vxcli auth login [-u <username> -k <api-key>] | [--device]",
+        "flags": [{"flag": "--device", "description": "Device-code flow (no browser)"}],
+        "examples": [{"label": "Headless", "language": "bash", "code": "vxcli auth login --device\n"}],
+    }]}
+    # glued after a text-chunk row with no newline, as on the live site
+    payload = "26:T5,hello" + "1d:" + json.dumps(["$", "div", None, {"group": group}])
+    html = f"<html><script>self.__next_f.push([1,{json.dumps(payload)}])</script></html>"
+    (c,) = flight_chunks(html, "https://vxcloud.io/docs/cli/authentication/", "vxcli Authentication")
+    assert c.heading_path == ["Authentication (vxcli auth)", "vxcli auth login"]
+    assert "--device: Device-code flow (no browser)" in c.text
+    assert "```bash\nvxcli auth login --device\n```" in c.text
+    assert DocIndex([c]).search("how do I log in headless with the device flow", k=1)[0]["chunk"] is c
+
+
+def test_coverage_rejects_terms_the_corpus_never_saw(index):
+    top = index.search("poem about cats", k=1)
+    assert not top or top[0]["coverage"] < 0.5
