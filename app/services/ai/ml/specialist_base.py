@@ -194,6 +194,31 @@ class SpecialistBackend:
         }
 
 
+def _specialist_chat(self, system: str, user: str, max_new_tokens: int = 500) -> Optional[str]:
+    """Grounded-answer generation: the model's own chat template + greedy decoding.
+
+    Returns None when the loaded model has no chat template (e.g. the distilgpt2 fallback) so
+    callers fall back to extractive answers instead of emitting base-LM rambling.
+    """
+    if not self.loaded or self.tokenizer is None or self.model is None:
+        return None
+    if not getattr(self.tokenizer, "chat_template", None):
+        return None
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = self.tokenizer(prompt, return_tensors="pt").to(self.effective_device)
+    with torch.no_grad():
+        output = self.model.generate(
+            **inputs, max_new_tokens=max_new_tokens, do_sample=False,
+            pad_token_id=self.tokenizer.eos_token_id,
+        )
+    new_tokens = output[0][inputs["input_ids"].shape[1]:]
+    return self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+SpecialistBackend.chat = _specialist_chat
+
+
 def _repo_root() -> Path:
     """Resolve the project root (parent of the `app` package).
 
