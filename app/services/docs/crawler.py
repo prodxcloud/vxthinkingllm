@@ -387,6 +387,37 @@ def llms_txt_to_chunks(text: str, url: str) -> List[Chunk]:
     return chunks
 
 
+def endpoint_json_to_chunks(text: str, url: str, base_url: str) -> List[Chunk]:
+    """Index a site's machine-readable endpoint inventory as searchable chunks."""
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    rows = payload.get("endpoints", []) if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    chunks: List[Chunk] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        method, path = row.get("method", ""), row["path"]
+        href = row.get("href", "")
+        source = urljoin(base_url, href) if href else url
+        text_body = (
+            f"{method} {path}\n{row.get('summary', '')}\n"
+            f"Domain: {row.get('domain', '')}. Authentication: {row.get('auth', 'unspecified')}. "
+            f"Status: {row.get('realness_basis', row.get('realness', 'unspecified'))}.\n"
+            f"Documentation: {source}"
+        ).strip()
+        chunks.append(Chunk(
+            id=f"endpoints.json#{_slug(method + '-' + path)}:0",
+            url=url, page_title="SalesShift API endpoint inventory",
+            heading_path=[str(row.get("domain", "API")), f"{method} {path}"],
+            text=text_body, anchor=row.get("anchor"), code_blocks=[]
+        ))
+    return chunks
+
+
 def extract_links(html: str, page_url: str, base_host: str) -> List[str]:
     soup = BeautifulSoup(html, "lxml")
     out: List[str] = []
@@ -448,7 +479,7 @@ async def crawl(
             try:
                 r = await client.get(u)
                 ctype = r.headers.get("content-type", "")
-                if r.status_code == 200 and u.endswith("llms.txt"):
+                if r.status_code == 200 and (u.endswith("llms.txt") or u.endswith("endpoints.json")):
                     return r.text
                 if r.status_code != 200 or "text/html" not in ctype:
                     errors[u] = f"HTTP {r.status_code}"
@@ -469,6 +500,9 @@ async def crawl(
                     continue
                 if u.endswith("llms.txt"):
                     chunks.extend(llms_txt_to_chunks(html, u))
+                    continue
+                if u.endswith("endpoints.json"):
+                    chunks.extend(endpoint_json_to_chunks(html, u, base_url))
                     continue
                 page_chunks = html_to_chunks(html, u)
                 title = page_chunks[0].page_title if page_chunks else u

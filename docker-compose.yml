@@ -42,8 +42,6 @@ services:
       start_period: 15s
     volumes:
       - ./app/data:/app/data
-    depends_on:
-      - redis
     restart: unless-stopped
 
   redis:
